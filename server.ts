@@ -96,20 +96,20 @@ async function startServer() {
     res.json(categories);
   });
 
-  // Categories: Create (Requires auth)
-  app.post('/api/categories', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  // Categories: Create (with or without auth)
+  app.post('/api/categories', (req: AuthenticatedRequest, res: Response) => {
     try {
-      const newCategory = db.createCategory(req.body, req.user!);
+      const newCategory = db.createCategory(req.body, req.user || null);
       res.status(201).json(newCategory);
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Не удалось создать категорию' });
     }
   });
 
-  // Categories: Update (Requires author)
-  app.put('/api/categories/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  // Categories: Update
+  app.put('/api/categories/:id', (req: AuthenticatedRequest, res: Response) => {
     try {
-      const updated = db.updateCategory(req.params.id, req.body, req.user!);
+      const updated = db.updateCategory(req.params.id, req.body, req.user || null);
       res.json(updated);
     } catch (err: any) {
       const status = err.message?.includes('Только автор') ? 403 : 400;
@@ -117,14 +117,25 @@ async function startServer() {
     }
   });
 
-  // Categories: Delete (Requires author)
-  app.delete('/api/categories/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  // Categories: Delete
+  app.delete('/api/categories/:id', (req: AuthenticatedRequest, res: Response) => {
     try {
-      db.deleteCategory(req.params.id, req.user!);
+      db.deleteCategory(req.params.id, req.user || null);
       res.json({ success: true, id: req.params.id });
     } catch (err: any) {
       const status = err.message?.includes('Только автор') ? 403 : 400;
       res.status(status).json({ error: err.message || 'Ошибка удаления категории' });
+    }
+  });
+
+  // Categories: Sync array (Bulk replace / sync)
+  app.post('/api/categories/sync', (req: Request, res: Response) => {
+    try {
+      const { categories } = req.body;
+      const result = db.setCategories(categories);
+      res.json({ success: true, categories: result });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Ошибка синхронизации тем' });
     }
   });
 
@@ -135,10 +146,10 @@ async function startServer() {
     res.json(questions);
   });
 
-  // Questions: Create (Requires author of category)
-  app.post('/api/questions', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  // Questions: Create (with or without auth)
+  app.post('/api/questions', (req: AuthenticatedRequest, res: Response) => {
     try {
-      const newQuestion = db.createQuestion(req.body, req.user!);
+      const newQuestion = db.createQuestion(req.body, req.user || null);
       res.status(201).json(newQuestion);
     } catch (err: any) {
       const status = err.message?.includes('Только автор') ? 403 : 400;
@@ -146,10 +157,10 @@ async function startServer() {
     }
   });
 
-  // Questions: Update (Requires author of category)
-  app.put('/api/questions/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  // Questions: Update
+  app.put('/api/questions/:id', (req: AuthenticatedRequest, res: Response) => {
     try {
-      const updated = db.updateQuestion(req.params.id, req.body, req.user!);
+      const updated = db.updateQuestion(req.params.id, req.body, req.user || null);
       res.json(updated);
     } catch (err: any) {
       const status = err.message?.includes('Только автор') ? 403 : 400;
@@ -157,14 +168,37 @@ async function startServer() {
     }
   });
 
-  // Questions: Delete (Requires author of category)
-  app.delete('/api/questions/:id', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  // Questions: Delete
+  app.delete('/api/questions/:id', (req: AuthenticatedRequest, res: Response) => {
     try {
-      db.deleteQuestion(req.params.id, req.user!);
+      db.deleteQuestion(req.params.id, req.user || null);
       res.json({ success: true, id: req.params.id });
     } catch (err: any) {
       const status = err.message?.includes('Только автор') ? 403 : 400;
       res.status(status).json({ error: err.message || 'Ошибка удаления клипа' });
+    }
+  });
+
+  // Questions: Sync array
+  app.post('/api/questions/sync', (req: Request, res: Response) => {
+    try {
+      const { questions } = req.body;
+      const result = db.setQuestions(questions);
+      res.json({ success: true, questions: result });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Ошибка синхронизации клипов' });
+    }
+  });
+
+  // Global Sync: Categories + Questions in one atomic write
+  app.post('/api/sync-all', (req: Request, res: Response) => {
+    try {
+      const { categories, questions } = req.body;
+      if (Array.isArray(categories)) db.setCategories(categories);
+      if (Array.isArray(questions)) db.setQuestions(questions);
+      res.json({ success: true, categories: db.getCategories(), questions: db.getQuestions() });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Ошибка сохранения' });
     }
   });
 

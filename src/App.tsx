@@ -55,14 +55,35 @@ export default function App() {
     // 2. Categories
     try {
       const remoteCategories = await api.categories.getAll();
-      if (Array.isArray(remoteCategories)) {
-        const clean = remoteCategories.filter(
-          (c) => c.id !== 'cat_extreme' && c.id !== 'cat_twitch' && c.id !== 'cat_tiktok'
-        );
-        setCategories(clean);
-        saveCategories(clean);
+      const localCategories = getStoredCategories();
+
+      const cleanRemote = Array.isArray(remoteCategories)
+        ? remoteCategories.filter((c) => c.id !== 'cat_extreme' && c.id !== 'cat_twitch' && c.id !== 'cat_tiktok')
+        : [];
+      const cleanLocal = Array.isArray(localCategories)
+        ? localCategories.filter((c) => c.id !== 'cat_extreme' && c.id !== 'cat_twitch' && c.id !== 'cat_tiktok')
+        : [];
+
+      if (cleanRemote.length > 0) {
+        // Server has categories! Merge any local category created by user
+        const remoteIds = new Set(cleanRemote.map((c) => c.id));
+        const missingOnRemote = cleanLocal.filter((c) => !remoteIds.has(c.id));
+        if (missingOnRemote.length > 0) {
+          const merged = [...cleanRemote, ...missingOnRemote];
+          setCategories(merged);
+          saveCategories(merged);
+          api.categories.sync(merged).catch(console.error);
+        } else {
+          setCategories(cleanRemote);
+          saveCategories(cleanRemote);
+        }
+      } else if (cleanLocal.length > 0) {
+        // Server database is empty, but local has data! Sync local data to server
+        setCategories(cleanLocal);
+        api.categories.sync(cleanLocal).catch(console.error);
       } else {
-        setCategories(getStoredCategories());
+        setCategories([]);
+        saveCategories([]);
       }
     } catch {
       setCategories(getStoredCategories());
@@ -71,16 +92,41 @@ export default function App() {
     // 3. Questions
     try {
       const remoteQuestions = await api.questions.getAll();
-      if (Array.isArray(remoteQuestions)) {
-        const cleanQuestions = remoteQuestions.filter(
-          (q) =>
-            !['q_bike_1', 'q_bike_2', 'q_bike_3', 'q_twitch_1', 'q_tiktok_1'].includes(q.id) &&
-            !['cat_extreme', 'cat_twitch', 'cat_tiktok'].includes(q.categoryId)
-        );
-        setQuestions(cleanQuestions);
-        saveQuestions(cleanQuestions);
+      const localQuestions = getStoredQuestions();
+
+      const cleanRemote = Array.isArray(remoteQuestions)
+        ? remoteQuestions.filter(
+            (q) =>
+              !['q_bike_1', 'q_bike_2', 'q_bike_3', 'q_twitch_1', 'q_tiktok_1'].includes(q.id) &&
+              !['cat_extreme', 'cat_twitch', 'cat_tiktok'].includes(q.categoryId)
+          )
+        : [];
+      const cleanLocal = Array.isArray(localQuestions)
+        ? localQuestions.filter(
+            (q) =>
+              !['q_bike_1', 'q_bike_2', 'q_bike_3', 'q_twitch_1', 'q_tiktok_1'].includes(q.id) &&
+              !['cat_extreme', 'cat_twitch', 'cat_tiktok'].includes(q.categoryId)
+          )
+        : [];
+
+      if (cleanRemote.length > 0) {
+        const remoteIds = new Set(cleanRemote.map((q) => q.id));
+        const missingOnRemote = cleanLocal.filter((q) => !remoteIds.has(q.id));
+        if (missingOnRemote.length > 0) {
+          const merged = [...cleanRemote, ...missingOnRemote];
+          setQuestions(merged);
+          saveQuestions(merged);
+          api.questions.sync(merged).catch(console.error);
+        } else {
+          setQuestions(cleanRemote);
+          saveQuestions(cleanRemote);
+        }
+      } else if (cleanLocal.length > 0) {
+        setQuestions(cleanLocal);
+        api.questions.sync(cleanLocal).catch(console.error);
       } else {
-        setQuestions(getStoredQuestions());
+        setQuestions([]);
+        saveQuestions([]);
       }
     } catch {
       setQuestions(getStoredQuestions());
@@ -101,17 +147,37 @@ export default function App() {
 
   useEffect(() => {
     loadData();
+
+    // Auto-refresh when switching back to tab or every 8 seconds so friend's themes appear live
+    const handleFocus = () => loadData();
+    window.addEventListener('focus', handleFocus);
+    const interval = setInterval(loadData, 8000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
   }, []);
 
-  // Handlers for persistence
-  const handleSaveCategories = (newCategories: Category[]) => {
+  // Handlers for persistence: save locally AND sync to server immediately
+  const handleSaveCategories = async (newCategories: Category[]) => {
     setCategories(newCategories);
     saveCategories(newCategories);
+    try {
+      await api.categories.sync(newCategories);
+    } catch (e) {
+      console.error('Failed to sync categories to server', e);
+    }
   };
 
-  const handleSaveQuestions = (newQuestions: VideoQuestion[]) => {
+  const handleSaveQuestions = async (newQuestions: VideoQuestion[]) => {
     setQuestions(newQuestions);
     saveQuestions(newQuestions);
+    try {
+      await api.questions.sync(newQuestions);
+    } catch (e) {
+      console.error('Failed to sync questions to server', e);
+    }
   };
 
   const handleResetAllData = () => {

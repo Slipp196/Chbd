@@ -119,6 +119,14 @@ export const api = {
         method: 'DELETE',
       });
     },
+
+    async sync(categories: Category[]): Promise<Category[]> {
+      const res = await request<{ success: boolean; categories: Category[] }>('/api/categories/sync', {
+        method: 'POST',
+        body: JSON.stringify({ categories }),
+      });
+      return res.categories || categories;
+    },
   },
 
   // Questions
@@ -152,6 +160,21 @@ export const api = {
         method: 'DELETE',
       });
     },
+
+    async sync(questions: VideoQuestion[]): Promise<VideoQuestion[]> {
+      const res = await request<{ success: boolean; questions: VideoQuestion[] }>('/api/questions/sync', {
+        method: 'POST',
+        body: JSON.stringify({ questions }),
+      });
+      return res.questions || questions;
+    },
+  },
+
+  async syncAll(categories: Category[], questions: VideoQuestion[]): Promise<void> {
+    await request('/api/sync-all', {
+      method: 'POST',
+      body: JSON.stringify({ categories, questions }),
+    });
   },
 
   // Stats

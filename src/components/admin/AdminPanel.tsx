@@ -19,6 +19,7 @@ import { Category, VideoQuestion, User } from '../../types';
 import { CategoryModal } from './CategoryModal';
 import { VideoEditorModal } from './VideoEditorModal';
 import { deleteVideoBlob } from '../../services/db';
+import { api } from '../../services/api';
 
 interface AdminPanelProps {
   categories: Category[];
@@ -77,10 +78,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Categories CRUD
   const handleOpenNewCategory = () => {
-    if (!currentUser) {
-      onRequireAuth();
-      return;
-    }
     setEditingCategory(null);
     setIsCategoryModalOpen(true);
   };
@@ -88,7 +85,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleSaveCategory = (data: Omit<Category, 'createdAt'> & { id?: string }) => {
     if (data.id) {
       const existing = categories.find((c) => c.id === data.id);
-      if (existing && existing.authorId && (!currentUser || currentUser.id !== existing.authorId)) {
+      if (existing && existing.authorId && currentUser && currentUser.id !== existing.authorId) {
         setErrorMessage('Только автор может редактировать эту тему');
         return;
       }
@@ -106,18 +103,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       );
       onSaveCategories(updated);
     } else {
-      if (!currentUser) {
-        onRequireAuth();
-        return;
-      }
       const newCat: Category = {
-        id: `cat_${Date.now()}`,
+        id: `cat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         title: data.title,
         description: data.description,
         tag: data.tag,
         imageUrl: data.imageUrl,
-        authorId: currentUser.id,
-        authorName: currentUser.username,
+        authorId: currentUser?.id || null,
+        authorName: currentUser?.username || 'Автор',
         createdAt: Date.now(),
       };
       const updated = [...categories, newCat];
@@ -128,7 +121,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleDeleteCategory = (catId: string) => {
     const cat = categories.find((c) => c.id === catId);
-    if (cat && cat.authorId && (!currentUser || currentUser.id !== cat.authorId)) {
+    if (cat && cat.authorId && currentUser && currentUser.id !== cat.authorId) {
       setErrorMessage('Только автор может удалить эту тему');
       setConfirmDeleteCatId(null);
       return;
@@ -146,6 +139,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
     onSaveCategories(updatedCategories);
     onSaveQuestions(updatedQuestions);
+    api.categories.delete(catId).catch(console.error);
 
     if (selectedCategoryId === catId) {
       setSelectedCategoryId(updatedCategories[0]?.id || '');
@@ -187,6 +181,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
     const updated = questions.filter((item) => item.id !== questionId);
     onSaveQuestions(updated);
+    api.questions.delete(questionId).catch(console.error);
   };
 
   const moveQuestion = (index: number, direction: 'up' | 'down') => {

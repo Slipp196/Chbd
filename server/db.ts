@@ -188,18 +188,28 @@ class Database {
   }
 
   public createCategory(
-    categoryData: Omit<Category, 'id' | 'authorId' | 'authorName' | 'createdAt'>,
-    user: User
+    categoryData: Omit<Category, 'id' | 'authorId' | 'authorName' | 'createdAt'> & {
+      id?: string;
+      authorId?: string | null;
+      authorName?: string;
+      createdAt?: number;
+    },
+    user?: User | null
   ): Category {
     const newCategory: Category = {
       ...categoryData,
-      id: `cat_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
-      authorId: user.id,
-      authorName: user.username,
-      createdAt: Date.now(),
+      id: categoryData.id || `cat_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+      authorId: user?.id || categoryData.authorId || null,
+      authorName: user?.username || categoryData.authorName || 'Автор',
+      createdAt: categoryData.createdAt || Date.now(),
     };
 
-    this.data.categories.unshift(newCategory);
+    const existingIndex = this.data.categories.findIndex((c) => c.id === newCategory.id);
+    if (existingIndex >= 0) {
+      this.data.categories[existingIndex] = { ...this.data.categories[existingIndex], ...newCategory };
+    } else {
+      this.data.categories.unshift(newCategory);
+    }
     this.saveData();
     return newCategory;
   }
@@ -207,7 +217,7 @@ class Database {
   public updateCategory(
     id: string,
     updates: Partial<Omit<Category, 'id' | 'authorId' | 'authorName' | 'createdAt'>>,
-    user: User
+    user?: User | null
   ): Category {
     const index = this.data.categories.findIndex((c) => c.id === id);
     if (index === -1) {
@@ -216,18 +226,17 @@ class Database {
 
     const category = this.data.categories[index];
 
-    // Ownership check: If category has an authorId, only that user can edit it
-    if (category.authorId && category.authorId !== user.id) {
+    // Ownership check: only block if category has authorId AND current user has different authorId
+    if (category.authorId && user && category.authorId !== user.id) {
       throw new Error('Только автор может редактировать эту тему');
     }
 
     const updated: Category = {
       ...category,
       ...updates,
-      // preserve authorship and IDs
       id: category.id,
-      authorId: category.authorId || user.id,
-      authorName: category.authorName || user.username,
+      authorId: category.authorId || user?.id || null,
+      authorName: category.authorName || user?.username || 'Автор',
     };
 
     this.data.categories[index] = updated;
@@ -235,14 +244,14 @@ class Database {
     return updated;
   }
 
-  public deleteCategory(id: string, user: User): void {
+  public deleteCategory(id: string, user?: User | null): void {
     const index = this.data.categories.findIndex((c) => c.id === id);
     if (index === -1) {
-      throw new Error('Категория не найдена');
+      return;
     }
 
     const category = this.data.categories[index];
-    if (category.authorId && category.authorId !== user.id) {
+    if (category.authorId && user && category.authorId !== user.id) {
       throw new Error('Только автор может удалить эту тему');
     }
 
@@ -251,6 +260,26 @@ class Database {
     // Remove related questions
     this.data.questions = this.data.questions.filter((q) => q.categoryId !== id);
     this.saveData();
+  }
+
+  public syncCategories(categories: Category[]): Category[] {
+    if (!Array.isArray(categories)) return this.data.categories;
+    for (const cat of categories) {
+      const idx = this.data.categories.findIndex((c) => c.id === cat.id);
+      if (idx >= 0) {
+        this.data.categories[idx] = { ...this.data.categories[idx], ...cat };
+      } else {
+        this.data.categories.push(cat);
+      }
+    }
+    this.saveData();
+    return this.data.categories;
+  }
+
+  public setCategories(categories: Category[]): Category[] {
+    this.data.categories = Array.isArray(categories) ? [...categories] : [];
+    this.saveData();
+    return this.data.categories;
   }
 
   // --- Questions ---
@@ -262,26 +291,26 @@ class Database {
   }
 
   public createQuestion(
-    questionData: Omit<VideoQuestion, 'id' | 'authorId' | 'createdAt'>,
-    user: User
+    questionData: Omit<VideoQuestion, 'id' | 'authorId' | 'createdAt'> & {
+      id?: string;
+      authorId?: string | null;
+      createdAt?: number;
+    },
+    user?: User | null
   ): VideoQuestion {
-    // Verify user owns the category
-    const category = this.getCategoryById(questionData.categoryId);
-    if (!category) {
-      throw new Error('Категория не найдена');
-    }
-    if (category.authorId && category.authorId !== user.id) {
-      throw new Error('Только автор темы может добавлять в нее клипы');
-    }
-
     const newQuestion: VideoQuestion = {
       ...questionData,
-      id: `q_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
-      authorId: user.id,
-      createdAt: Date.now(),
+      id: questionData.id || `q_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+      authorId: user?.id || questionData.authorId || null,
+      createdAt: questionData.createdAt || Date.now(),
     };
 
-    this.data.questions.push(newQuestion);
+    const existingIndex = this.data.questions.findIndex((q) => q.id === newQuestion.id);
+    if (existingIndex >= 0) {
+      this.data.questions[existingIndex] = { ...this.data.questions[existingIndex], ...newQuestion };
+    } else {
+      this.data.questions.push(newQuestion);
+    }
     this.saveData();
     return newQuestion;
   }
@@ -289,7 +318,7 @@ class Database {
   public updateQuestion(
     id: string,
     updates: Partial<Omit<VideoQuestion, 'id' | 'authorId' | 'createdAt'>>,
-    user: User
+    user?: User | null
   ): VideoQuestion {
     const index = this.data.questions.findIndex((q) => q.id === id);
     if (index === -1) {
@@ -299,7 +328,7 @@ class Database {
     const question = this.data.questions[index];
     const category = this.getCategoryById(question.categoryId);
 
-    if (category && category.authorId && category.authorId !== user.id) {
+    if (category && category.authorId && user && category.authorId !== user.id) {
       throw new Error('Только автор темы может редактировать клипы');
     }
 
@@ -307,7 +336,7 @@ class Database {
       ...question,
       ...updates,
       id: question.id,
-      authorId: question.authorId || user.id,
+      authorId: question.authorId || user?.id || null,
     };
 
     this.data.questions[index] = updated;
@@ -315,21 +344,41 @@ class Database {
     return updated;
   }
 
-  public deleteQuestion(id: string, user: User): void {
+  public deleteQuestion(id: string, user?: User | null): void {
     const index = this.data.questions.findIndex((q) => q.id === id);
     if (index === -1) {
-      throw new Error('Вопрос не найден');
+      return;
     }
 
     const question = this.data.questions[index];
     const category = this.getCategoryById(question.categoryId);
 
-    if (category && category.authorId && category.authorId !== user.id) {
+    if (category && category.authorId && user && category.authorId !== user.id) {
       throw new Error('Только автор темы может удалять клипы');
     }
 
     this.data.questions.splice(index, 1);
     this.saveData();
+  }
+
+  public syncQuestions(questions: VideoQuestion[]): VideoQuestion[] {
+    if (!Array.isArray(questions)) return this.data.questions;
+    for (const q of questions) {
+      const idx = this.data.questions.findIndex((item) => item.id === q.id);
+      if (idx >= 0) {
+        this.data.questions[idx] = { ...this.data.questions[idx], ...q };
+      } else {
+        this.data.questions.push(q);
+      }
+    }
+    this.saveData();
+    return this.data.questions;
+  }
+
+  public setQuestions(questions: VideoQuestion[]): VideoQuestion[] {
+    this.data.questions = Array.isArray(questions) ? [...questions] : [];
+    this.saveData();
+    return this.data.questions;
   }
 
   // --- Stats ---
