@@ -1,0 +1,6 @@
+{
+  "name": "Что было дальше?",
+  "description": "Интерактивная видео-викторина в минималистичном стиле Zen и ChatGPT: угадывай исход клипов, зарабатывай очки и создавай свои категории в админ-панели.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
