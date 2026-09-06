@@ -64,7 +64,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new Error(data.error || `Ошибка сервера (${res.status})`);
+    const error: any = new Error(data.error || `Ошибка сервера (${res.status})`);
+    error.status = res.status;
+    throw error;
   }
 
   return data as T;
@@ -93,6 +95,16 @@ export const api = {
       return res;
     },
 
+    async loginWithTwitch(twitchLogin: string): Promise<{ user: User; token: string }> {
+      const res = await request<{ user: User; token: string }>('/api/auth/twitch', {
+        method: 'POST',
+        body: JSON.stringify({ twitchLogin }),
+      });
+      setStoredToken(res.token);
+      setStoredUser(res.user);
+      return res;
+    },
+
     async getMe(): Promise<User | null> {
       const token = getStoredToken();
       if (!token) {
@@ -103,14 +115,20 @@ export const api = {
         const res = await request<{ user: User | null }>('/api/auth/me');
         if (res.user) {
           setStoredUser(res.user);
+          return res.user;
         } else {
           setStoredUser(null);
+          return null;
         }
-        return res.user;
-      } catch {
-        setStoredToken(null);
-        setStoredUser(null);
-        return null;
+      } catch (err: any) {
+        // Only invalidate session if server explicitly returned 401 Unauthorized
+        if (err?.status === 401) {
+          setStoredToken(null);
+          setStoredUser(null);
+          return null;
+        }
+        // If server is restarting or network hiccup, fallback to cached user
+        return getStoredUser();
       }
     },
 

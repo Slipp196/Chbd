@@ -237,6 +237,82 @@ async function startServer() {
     }
   });
 
+  // Auth: Twitch login / registration
+  app.post('/api/auth/twitch', async (req: Request, res: Response) => {
+    try {
+      const { twitchLogin } = req.body;
+      if (!twitchLogin || typeof twitchLogin !== 'string') {
+        res.status(400).json({ error: 'Укажите никнейм Twitch' });
+        return;
+      }
+
+      const cleanLogin = twitchLogin
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\/(www\.)?twitch\.tv\//, '')
+        .replace(/\/.*$/, '');
+
+      if (!cleanLogin) {
+        res.status(400).json({ error: 'Неверный никнейм Twitch' });
+        return;
+      }
+
+      let profileImageURL: string | undefined;
+      let displayName = cleanLogin;
+      let description = '';
+      let twitchId = '';
+
+      try {
+        const gqlQuery = {
+          query: `query($login: String!) {
+            user(login: $login) {
+              id
+              login
+              displayName
+              profileImageURL(width: 300)
+              description
+            }
+          }`,
+          variables: { login: cleanLogin },
+        };
+
+        const twitchResponse = await fetch('https://gql.twitch.tv/gql', {
+          method: 'POST',
+          headers: {
+            'Client-Id': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(gqlQuery),
+        });
+
+        if (twitchResponse.ok) {
+          const gqlData: any = await twitchResponse.json();
+          const twitchUser = gqlData?.data?.user;
+          if (twitchUser) {
+            displayName = twitchUser.displayName || twitchUser.login || cleanLogin;
+            profileImageURL = twitchUser.profileImageURL;
+            description = twitchUser.description || '';
+            twitchId = twitchUser.id || '';
+          }
+        }
+      } catch (gqlErr) {
+        console.warn('Twitch GQL user lookup error:', gqlErr);
+      }
+
+      const result = db.loginOrRegisterWithTwitch({
+        login: cleanLogin,
+        displayName,
+        id: twitchId,
+        profileImageURL,
+        description,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Ошибка входа через Twitch' });
+    }
+  });
+
   // Auth: Current User
   app.get('/api/auth/me', (req: AuthenticatedRequest, res: Response) => {
     if (req.user) {
@@ -273,10 +349,10 @@ async function startServer() {
     res.json(categories);
   });
 
-  // Categories: Create (with or without auth)
-  app.post('/api/categories', (req: AuthenticatedRequest, res: Response) => {
+  // Categories: Create (STRICTLY requires authenticated user)
+  app.post('/api/categories', requireAuth, (req: AuthenticatedRequest, res: Response) => {
     try {
-      const newCategory = db.createCategory(req.body, req.user || null);
+      const newCategory = db.createCategory(req.body, req.user);
       res.status(201).json(newCategory);
     } catch (err: any) {
       res.status(400).json({ error: err.message || 'Не удалось создать категорию' });

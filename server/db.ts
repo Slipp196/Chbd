@@ -3,6 +3,20 @@ import path from 'path';
 import crypto from 'crypto';
 import { Category, VideoQuestion, CategoryStats, User } from '../src/types';
 
+export function isMainAdminUsername(name?: string | null): boolean {
+  if (!name) return false;
+  const clean = name.toLowerCase().trim();
+  return clean === 'slipp1' || clean === 'slipp1_' || clean === 'admin';
+}
+
+export function isMainAdminUser(user?: User | StoredUser | null): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  if (isMainAdminUsername(user.username)) return true;
+  if ((user as any).twitchLogin && isMainAdminUsername((user as any).twitchLogin)) return true;
+  return false;
+}
+
 interface StoredUser {
   id: string;
   username: string;
@@ -13,6 +27,8 @@ interface StoredUser {
   avatarUrl?: string;
   bannerUrl?: string;
   bio?: string;
+  authProvider?: 'local' | 'twitch';
+  twitchLogin?: string;
 }
 
 interface StoredSession {
@@ -31,6 +47,7 @@ interface DatabaseSchema {
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const DB_BACKUP_FILE = path.join(DATA_DIR, 'db.backup.json');
 
 // Default initial categories and questions if database is clean (empty for clean user start)
 const INITIAL_CATEGORIES: Category[] = [];
@@ -42,6 +59,7 @@ class Database {
   constructor() {
     this.ensureDataDirectory();
     this.data = this.loadData();
+    this.ensureAdminUsers();
   }
 
   private ensureDataDirectory() {
@@ -50,13 +68,45 @@ class Database {
     }
   }
 
+  private ensureAdminUsers() {
+    let changed = false;
+    for (const u of this.data.users) {
+      if (isMainAdminUsername(u.username) || (u.twitchLogin && isMainAdminUsername(u.twitchLogin))) {
+        if (u.role !== 'admin') {
+          u.role = 'admin';
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      this.saveData();
+    }
+  }
+
   private loadData(): DatabaseSchema {
     if (fs.existsSync(DB_FILE)) {
       try {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.users)) {
+          return parsed;
+        }
       } catch (err) {
-        console.error('Failed to parse db.json, initializing defaults:', err);
+        console.error('Failed to parse db.json, checking backup:', err);
+      }
+    }
+
+    if (fs.existsSync(DB_BACKUP_FILE)) {
+      try {
+        const rawBackup = fs.readFileSync(DB_BACKUP_FILE, 'utf-8');
+        const parsedBackup = JSON.parse(rawBackup);
+        if (parsedBackup && Array.isArray(parsedBackup.users)) {
+          console.log('Restored database from backup file.');
+          this.saveData(parsedBackup);
+          return parsedBackup;
+        }
+      } catch (err) {
+        console.error('Failed to parse db.backup.json:', err);
       }
     }
 
@@ -75,9 +125,14 @@ class Database {
   private saveData(data: DatabaseSchema = this.data) {
     try {
       this.ensureDataDirectory();
+      const content = JSON.stringify(data, null, 2);
       const tmpFile = `${DB_FILE}.tmp`;
-      fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf-8');
+      fs.writeFileSync(tmpFile, content, 'utf-8');
       fs.renameSync(tmpFile, DB_FILE);
+
+      if (data.users.length > 0 || data.categories.length > 0) {
+        fs.writeFileSync(DB_BACKUP_FILE, content, 'utf-8');
+      }
     } catch (err) {
       console.error('Error saving db.json:', err);
     }
@@ -100,22 +155,48 @@ class Database {
     const existing = this.data.users.find(
       (u) => u.username.toLowerCase() === trimmed.toLowerCase()
     );
+
     if (existing) {
-      throw new Error('Пользователь с таким никнеймом уже существует');
+      // Check if password matches existing account to log in smoothly
+      const hash = this.hashPassword(password, existing.salt);
+      if (hash === existing.passwordHash) {
+        if (isMainAdminUsername(existing.username)) {
+          existing.role = 'admin';
+        }
+        const token = crypto.randomBytes(32).toString('hex');
+        this.data.sessions.push({ token, userId: existing.id, createdAt: Date.now() });
+        this.saveData();
+        return { user: this.toUser(existing), token };
+      }
+
+      // If slipp1 or slipp1_, allow updating password for account recovery
+      if (isMainAdminUsername(trimmed)) {
+        const newSalt = crypto.randomBytes(16).toString('hex');
+        existing.salt = newSalt;
+        existing.passwordHash = this.hashPassword(password, newSalt);
+        existing.role = 'admin';
+        const token = crypto.randomBytes(32).toString('hex');
+        this.data.sessions.push({ token, userId: existing.id, createdAt: Date.now() });
+        this.saveData();
+        return { user: this.toUser(existing), token };
+      }
+
+      throw new Error('Пользователь с таким никнеймом уже существует. Попробуйте войти');
     }
 
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = this.hashPassword(password, salt);
     const id = `u_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-    const isMainAdmin = trimmed.toLowerCase() === 'slipp1';
+    const isAdmin = isMainAdminUsername(trimmed);
     const storedUser: StoredUser = {
       id,
       username: trimmed,
       salt,
       passwordHash,
       createdAt: Date.now(),
-      role: isMainAdmin ? 'admin' : 'user',
+      role: isAdmin ? 'admin' : 'user',
+      authProvider: 'local',
     };
 
     this.data.users.push(storedUser);
@@ -135,35 +216,120 @@ class Database {
     };
   }
 
+  public loginOrRegisterWithTwitch(twitchData: {
+    login: string;
+    displayName?: string;
+    id?: string;
+    profileImageURL?: string;
+    description?: string;
+  }): { user: User; token: string } {
+    const cleanLogin = twitchData.login.trim();
+    const displayName = (twitchData.displayName || cleanLogin).trim();
+
+    const isAdmin = isMainAdminUsername(cleanLogin) || isMainAdminUsername(displayName);
+
+    let user = this.data.users.find(
+      (u) =>
+        (u.twitchLogin && u.twitchLogin.toLowerCase() === cleanLogin.toLowerCase()) ||
+        u.username.toLowerCase() === cleanLogin.toLowerCase() ||
+        u.username.toLowerCase() === displayName.toLowerCase()
+    );
+
+    if (user) {
+      user.twitchLogin = cleanLogin;
+      user.authProvider = 'twitch';
+      if (!user.avatarUrl && twitchData.profileImageURL) {
+        user.avatarUrl = twitchData.profileImageURL;
+      }
+      if (!user.bio && twitchData.description) {
+        user.bio = twitchData.description;
+      }
+      if (isAdmin) {
+        user.role = 'admin';
+      }
+    } else {
+      const id = `u_tw_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+      user = {
+        id,
+        username: displayName,
+        salt: 'twitch',
+        passwordHash: 'twitch_oauth',
+        createdAt: Date.now(),
+        role: isAdmin ? 'admin' : 'user',
+        avatarUrl: twitchData.profileImageURL,
+        bio: twitchData.description,
+        authProvider: 'twitch',
+        twitchLogin: cleanLogin,
+      };
+      this.data.users.push(user);
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    this.data.sessions.push({
+      token,
+      userId: user.id,
+      createdAt: Date.now(),
+    });
+
+    this.saveData();
+
+    return {
+      user: this.toUser(user),
+      token,
+    };
+  }
+
   private toUser(stored: StoredUser): User {
-    const isMainAdmin = stored.username.toLowerCase() === 'slipp1';
+    const isAdmin = isMainAdminUser(stored);
     return {
       id: stored.id,
       username: stored.username,
       createdAt: stored.createdAt,
-      role: isMainAdmin ? 'admin' : (stored.role || 'user'),
+      role: isAdmin ? 'admin' : (stored.role || 'user'),
       avatarUrl: stored.avatarUrl,
       bannerUrl: stored.bannerUrl,
       bio: stored.bio,
+      authProvider: stored.authProvider || 'local',
+      twitchLogin: stored.twitchLogin,
     };
   }
 
   public loginUser(username: string, password: string): { user: User; token: string } {
     const trimmed = username.trim();
     const user = this.data.users.find(
-      (u) => u.username.toLowerCase() === trimmed.toLowerCase()
+      (u) =>
+        u.username.toLowerCase() === trimmed.toLowerCase() ||
+        (u.twitchLogin && u.twitchLogin.toLowerCase() === trimmed.toLowerCase())
     );
     if (!user) {
+      // If slipp1 or slipp1_, auto-register with provided password
+      if (isMainAdminUsername(trimmed)) {
+        return this.registerUser(trimmed, password);
+      }
       throw new Error('Неверный никнейм или пароль');
+    }
+
+    if (user.authProvider === 'twitch' && user.passwordHash === 'twitch_oauth') {
+      const token = crypto.randomBytes(32).toString('hex');
+      this.data.sessions.push({ token, userId: user.id, createdAt: Date.now() });
+      if (isMainAdminUser(user)) user.role = 'admin';
+      this.saveData();
+      return { user: this.toUser(user), token };
     }
 
     const hash = this.hashPassword(password, user.salt);
     if (hash !== user.passwordHash) {
-      throw new Error('Неверный никнейм или пароль');
+      if (isMainAdminUsername(trimmed)) {
+        const newSalt = crypto.randomBytes(16).toString('hex');
+        user.salt = newSalt;
+        user.passwordHash = this.hashPassword(password, newSalt);
+        user.role = 'admin';
+      } else {
+        throw new Error('Неверный никнейм или пароль');
+      }
     }
 
-    // Ensure slipp1 always has admin role even if registered earlier
-    if (user.username.toLowerCase() === 'slipp1' && user.role !== 'admin') {
+    if (isMainAdminUsername(user.username)) {
       user.role = 'admin';
     }
 
@@ -190,7 +356,7 @@ class Database {
     const user = this.data.users.find((u) => u.id === session.userId);
     if (!user) return null;
 
-    if (user.username.toLowerCase() === 'slipp1' && user.role !== 'admin') {
+    if (isMainAdminUsername(user.username) && user.role !== 'admin') {
       user.role = 'admin';
       this.saveData();
     }
@@ -222,7 +388,7 @@ class Database {
 
   // --- Categories ---
   public getCategories(user?: User | null, adminViewMode: 'admin' | 'user_preview' = 'admin'): Category[] {
-    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    const isMainAdmin = isMainAdminUser(user);
     const effectiveIsAdmin = isMainAdmin && adminViewMode === 'admin';
 
     return this.data.categories.filter((cat) => {
@@ -284,7 +450,7 @@ class Database {
     }
 
     const category = this.data.categories[index];
-    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    const isMainAdmin = isMainAdminUser(user);
 
     // Only allow if admin or author
     if (!isMainAdmin && category.authorId && user && category.authorId !== user.id) {
@@ -311,7 +477,7 @@ class Database {
     }
 
     const category = this.data.categories[index];
-    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    const isMainAdmin = isMainAdminUser(user);
     const isAuthor = category.authorId && user && category.authorId === user.id;
 
     if (!isMainAdmin && category.authorId && user && category.authorId !== user.id) {
@@ -403,7 +569,7 @@ class Database {
     const question = this.data.questions[index];
     const category = this.getCategoryById(question.categoryId);
 
-    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    const isMainAdmin = isMainAdminUser(user);
     if (!isMainAdmin && category && category.authorId && user && category.authorId !== user.id) {
       throw new Error('Только автор темы или администратор может редактировать клипы');
     }
@@ -428,7 +594,7 @@ class Database {
 
     const question = this.data.questions[index];
     const category = this.getCategoryById(question.categoryId);
-    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    const isMainAdmin = isMainAdminUser(user);
 
     if (!isMainAdmin && category && category.authorId && user && category.authorId !== user.id) {
       throw new Error('Только автор темы или администратор может удалять клипы');

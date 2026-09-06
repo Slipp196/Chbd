@@ -6,6 +6,8 @@ export interface User {
   avatarUrl?: string;
   bannerUrl?: string;
   bio?: string;
+  authProvider?: 'local' | 'twitch';
+  twitchLogin?: string;
 }
 
 export interface AuthState {

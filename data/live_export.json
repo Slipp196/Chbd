@@ -1,6 +1,16 @@
 {
-  "exportedAt": "2026-09-06T21:40:33.092Z",
-  "categories": [],
+  "exportedAt": "2026-09-06T22:53:46.264Z",
+  "categories": [
+    {
+      "id": "cat_1788732772987_usm4",
+      "title": "123123",
+      "description": "",
+      "tag": "ЧБД",
+      "authorId": "u_1788732668681_48fd0572",
+      "authorName": "slipp1_",
+      "createdAt": 1788732772987
+    }
+  ],
   "questions": [],
   "stats": {}
 }
