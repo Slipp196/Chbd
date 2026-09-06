@@ -31,6 +31,7 @@ interface AdminPanelProps {
   onSaveQuestions: (questions: VideoQuestion[]) => void;
   onResetAllData?: () => void;
   onPlayCategory: (category: Category) => void;
+  adminViewMode?: 'admin' | 'user_preview';
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -42,9 +43,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onSaveCategories,
   onSaveQuestions,
   onPlayCategory,
+  adminViewMode = 'admin',
 }) => {
+  // Admin check: slipp1 or role admin
+  const isGlobalAdmin =
+    (currentUser?.role === 'admin' || currentUser?.username?.toLowerCase() === 'slipp1') &&
+    adminViewMode !== 'user_preview';
+
+  // Visible categories in creator panel:
+  // Admin sees all themes from everyone.
+  // Normal users ONLY see their own themes!
+  const myCategories = isGlobalAdmin
+    ? categories
+    : categories.filter((c) => currentUser && c.authorId === currentUser.id);
+
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
-    initialSelectedCategoryId || categories[0]?.id || ''
+    initialSelectedCategoryId || myCategories[0]?.id || ''
   );
 
   // Modals state
@@ -57,17 +71,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [confirmDeleteCatId, setConfirmDeleteCatId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Active Category
+  // Active Category (from myCategories)
   const activeCategory =
-    categories.find((c) => c.id === selectedCategoryId) || categories[0] || null;
+    myCategories.find((c) => c.id === selectedCategoryId) || myCategories[0] || null;
 
   // Filter questions for active category
   const activeQuestions = questions.filter(
     (q) => q.categoryId === (activeCategory ? activeCategory.id : '')
   );
-
-  // Admin check
-  const isGlobalAdmin = currentUser?.role === 'admin' || currentUser?.username?.toLowerCase() === 'slipp1';
 
   // Can current user edit the active category?
   const canEditActiveCategory = Boolean(
@@ -145,7 +156,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     api.categories.delete(catId).catch(console.error);
 
     if (selectedCategoryId === catId) {
-      setSelectedCategoryId(updatedCategories[0]?.id || '');
+      const remainingMyCats = myCategories.filter((c) => c.id !== catId);
+      setSelectedCategoryId(remainingMyCats[0]?.id || '');
     }
     setConfirmDeleteCatId(null);
   };
@@ -254,26 +266,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         <div className="md:col-span-4 space-y-2.5">
           <div className="flex items-center justify-between px-1">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-              Темы ({categories.length})
+              {isGlobalAdmin ? `Все темы (${myCategories.length})` : `Мои темы (${myCategories.length})`}
             </span>
           </div>
 
           <div className="space-y-1.5">
-            {categories.map((cat) => {
-              const isSelected = activeCategory?.id === cat.id;
-              const count = questions.filter((q) => q.categoryId === cat.id).length;
-              const userOwnsCat = canEditCategory(cat);
+            {myCategories.length === 0 ? (
+              <div className="p-4 rounded-2xl bg-zinc-900/40 border border-white/[0.06] text-center space-y-2.5">
+                <p className="text-xs text-zinc-400">
+                  {currentUser
+                    ? 'У вас пока нет созданных тем ЧБД. Нажмите кнопку «Новая тема» выше, чтобы создать свою тему!'
+                    : 'Войдите в аккаунт, чтобы создавать темы ЧБД и загружать клипы.'}
+                </p>
+                {!currentUser && (
+                  <button
+                    type="button"
+                    onClick={onRequireAuth}
+                    className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-colors"
+                  >
+                    Войти в аккаунт
+                  </button>
+                )}
+              </div>
+            ) : (
+              myCategories.map((cat) => {
+                const isSelected = activeCategory?.id === cat.id;
+                const count = questions.filter((q) => q.categoryId === cat.id).length;
+                const userOwnsCat = canEditCategory(cat);
 
-              return (
-                <div
-                  key={cat.id}
-                  onClick={() => setSelectedCategoryId(cat.id)}
-                  className={`group relative flex items-center justify-between p-2.5 rounded-2xl border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-zinc-800/90 border-white/20 text-white shadow-md'
-                      : 'bg-zinc-900/40 hover:bg-zinc-900/80 border-white/[0.06] text-zinc-300'
-                  }`}
-                >
+                return (
+                  <div
+                    key={cat.id}
+                    onClick={() => setSelectedCategoryId(cat.id)}
+                    className={`group relative flex items-center justify-between p-2.5 rounded-2xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-zinc-800/90 border-white/20 text-white shadow-md'
+                        : 'bg-zinc-900/40 hover:bg-zinc-900/80 border-white/[0.06] text-zinc-300'
+                    }`}
+                  >
                   <div className="flex items-center gap-2.5 min-w-0">
                     {cat.imageUrl ? (
                       <img
@@ -343,7 +373,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
               );
-            })}
+            }))}
           </div>
 
           {/* Delete Category Confirmation */}
@@ -564,7 +594,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             </div>
           ) : (
-            <div className="p-8 text-center text-zinc-400 text-xs">Выберите или создайте тему</div>
+            <div className="flex flex-col items-center justify-center p-12 rounded-3xl bg-zinc-900/40 border border-white/[0.06] text-center">
+              <Layers className="w-12 h-12 text-zinc-600 mb-3" />
+              <h3 className="text-sm font-semibold text-zinc-200">Нет выбранной темы</h3>
+              <p className="text-xs text-zinc-400 max-w-sm mt-1 mb-4">
+                {currentUser
+                  ? 'Создайте новую тему, чтобы наполнить её клипами и вариантами ответов.'
+                  : 'Войдите в аккаунт, чтобы создавать свои темы и делиться ими с другими игроками.'}
+              </p>
+              {currentUser ? (
+                <button
+                  onClick={handleOpenNewCategory}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white hover:bg-zinc-100 text-zinc-950 text-xs font-semibold shadow-sm transition-all"
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  <span>Создать новую тему</span>
+                </button>
+              ) : (
+                <button
+                  onClick={onRequireAuth}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-all"
+                >
+                  <UserIcon className="w-4 h-4" />
+                  <span>Войти в аккаунт</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

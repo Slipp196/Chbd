@@ -237,18 +237,8 @@ class Database {
         return user && cat.authorId === user.id;
       }
 
-      // 1. Author's own categories are visible to author
-      if (user && cat.authorId === user.id) {
-        return true;
-      }
-
-      // 2. Official themes created by slipp1 or system are visible to all
-      if (!cat.authorId || cat.authorName?.toLowerCase() === 'slipp1') {
-        return true;
-      }
-
-      // 3. Other users' themes are hidden from ordinary users!
-      return false;
+      // In "Играть" all users can see and play all published themes from any user!
+      return true;
     });
   }
 

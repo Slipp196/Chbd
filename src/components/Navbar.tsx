@@ -1,15 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Volume2,
   VolumeX,
   Gamepad2,
   PlusCircle,
   User as UserIcon,
-  LogOut,
   Download,
   Eye,
-  ShieldCheck,
-  ShieldAlert,
 } from 'lucide-react';
 import { toggleMute, getMuteState } from '../utils/sound';
 import { ChbdLogo } from './ChbdLogo';
@@ -33,13 +30,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   onExitCategory,
   currentUser,
   onOpenAuth,
-  onLogout,
+  onLogout: _onLogout,
   onOpenDownload,
   adminViewMode = 'admin',
   onToggleAdminViewMode,
 }) => {
   const [muted, setMuted] = React.useState<boolean>(getMuteState());
-  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const handleSoundToggle = () => {
     const isNowMuted = toggleMute();
@@ -100,7 +96,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Играть</span>
           </button>
 
-          {/* If admin is previewing as regular user, hide Create tab to mimic guest/user experience */}
+          {/* Create tab */}
           {(!isPreviewingAsUser || isUserAdmin) && (
             <button
               id="nav-tab-admin"
@@ -113,21 +109,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <PlusCircle className="w-3.5 h-3.5" />
               <span>Создать ЧБД</span>
-            </button>
-          )}
-
-          {currentUser && (
-            <button
-              id="nav-tab-profile"
-              onClick={() => onTabChange('profile')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
-                currentTab === 'profile'
-                  ? 'bg-zinc-800 text-white shadow-sm border border-white/10'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
-              }`}
-            >
-              <UserIcon className="w-3.5 h-3.5" />
-              <span>Профиль</span>
             </button>
           )}
         </div>
@@ -153,76 +134,35 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {currentUser ? (
-            <div className="relative">
-              <button
-                id="nav-user-profile"
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className="h-10 px-3 rounded-2xl bg-zinc-900/85 hover:bg-zinc-800/90 border border-white/10 text-xs font-medium text-zinc-200 flex items-center gap-2 backdrop-blur-xl shadow-lg transition-all focus:outline-none"
-              >
-                {currentUser.avatarUrl ? (
-                  <img
-                    src={currentUser.avatarUrl}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    className="w-5 h-5 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="w-5 h-5 rounded-full bg-purple-600/30 text-purple-300 flex items-center justify-center text-[10px] font-bold">
-                    {currentUser.username[0].toUpperCase()}
-                  </div>
-                )}
-                <span className="max-w-[90px] truncate">{currentUser.username}</span>
-              </button>
-
-              {showUserMenu && (
-                <div className="absolute right-0 top-full mt-2 w-48 rounded-2xl bg-zinc-900/95 border border-white/10 p-1.5 shadow-2xl backdrop-blur-xl z-50">
-                  <div className="px-3 py-2 border-b border-white/5">
-                    <div className="text-[11px] text-zinc-400">Вы вошли как</div>
-                    <div className="font-semibold text-zinc-100 flex items-center gap-1">
-                      <span>{currentUser.username}</span>
-                      {isUserAdmin && (
-                        <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setShowUserMenu(false);
-                      onTabChange('profile');
-                    }}
-                    className="w-full mt-1 flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-zinc-300 hover:bg-white/10 transition-colors text-left"
-                  >
-                    <UserIcon className="w-3.5 h-3.5 text-zinc-400" />
-                    <span>Мой профиль</span>
-                  </button>
-
-                  {isUserAdmin && onToggleAdminViewMode && (
-                    <button
-                      onClick={() => {
-                        setShowUserMenu(false);
-                        onToggleAdminViewMode();
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-amber-300 hover:bg-amber-500/10 transition-colors text-left"
-                    >
-                      <Eye className="w-3.5 h-3.5 text-amber-400" />
-                      <span>{isPreviewingAsUser ? 'Режим: Админ' : 'Режим: Гость'}</span>
-                    </button>
-                  )}
-
-                  <button
-                    onClick={() => {
-                      setShowUserMenu(false);
-                      onLogout();
-                    }}
-                    className="w-full mt-1 flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-rose-400 hover:bg-rose-500/10 transition-colors text-left"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Выйти</span>
-                  </button>
+            <button
+              id="nav-user-profile"
+              onClick={() => onTabChange('profile')}
+              title="Мой профиль"
+              className={`h-10 px-3 rounded-2xl border text-xs font-medium flex items-center gap-2 backdrop-blur-xl shadow-lg transition-all focus:outline-none ${
+                currentTab === 'profile'
+                  ? 'bg-zinc-800 border-white/30 text-white ring-1 ring-white/20'
+                  : 'bg-zinc-900/85 hover:bg-zinc-800/90 border-white/10 text-zinc-200'
+              }`}
+            >
+              {currentUser.avatarUrl ? (
+                <img
+                  src={currentUser.avatarUrl}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="w-5 h-5 rounded-full object-cover shrink-0"
+                />
+              ) : (
+                <div className="w-5 h-5 rounded-full bg-purple-600/30 text-purple-300 flex items-center justify-center text-[10px] font-bold shrink-0">
+                  {currentUser.username[0].toUpperCase()}
                 </div>
               )}
-            </div>
+              <span className="max-w-[90px] truncate">{currentUser.username}</span>
+              {isUserAdmin && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 shrink-0">
+                  admin
+                </span>
+              )}
+            </button>
           ) : (
             <button
               id="nav-login-btn"

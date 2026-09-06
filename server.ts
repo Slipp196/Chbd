@@ -82,6 +82,51 @@ async function startServer() {
     }
   });
 
+  // Upload image (avatar, banner, category cover) directly to server
+  app.post('/api/upload-image', (req: Request, res: Response) => {
+    try {
+      // If sent as JSON with base64 data
+      if (req.body && req.body.data) {
+        const { data, filename: originalName } = req.body;
+        const matches = (data as string).match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (!matches || matches.length !== 3) {
+          res.status(400).json({ error: 'Неверный формат base64' });
+          return;
+        }
+        const buffer = Buffer.from(matches[2], 'base64');
+        const ext = path.extname(originalName || '') || '.png';
+        const safeExt = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(ext.toLowerCase()) ? ext.toLowerCase() : '.png';
+        const filename = `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${safeExt}`;
+        const filePath = path.join(uploadsDir, filename);
+        fs.writeFileSync(filePath, buffer);
+        res.json({ success: true, url: `/uploads/${filename}`, filename });
+        return;
+      }
+
+      // If sent as binary stream with headers
+      const originalName = decodeURIComponent((req.headers['x-filename'] as string) || 'image.png');
+      const ext = path.extname(originalName) || '.png';
+      const safeExt = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'].includes(ext.toLowerCase()) ? ext.toLowerCase() : '.png';
+      const filename = `img_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${safeExt}`;
+      const filePath = path.join(uploadsDir, filename);
+
+      const writeStream = fs.createWriteStream(filePath);
+      req.pipe(writeStream);
+
+      writeStream.on('finish', () => {
+        const publicUrl = `/uploads/${filename}`;
+        res.json({ success: true, url: publicUrl, filename });
+      });
+
+      writeStream.on('error', (err) => {
+        console.error('Error saving uploaded image:', err);
+        res.status(500).json({ error: 'Ошибка сохранения изображения на сервере' });
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Ошибка загрузки изображения' });
+    }
+  });
+
   // Resolve Twitch clips server-side (bypasses browser CORS & restrictions)
   app.get('/api/twitch/resolve', async (req: Request, res: Response) => {
     try {

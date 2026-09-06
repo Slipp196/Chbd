@@ -153,6 +153,7 @@ export default function App() {
   const handleLogout = async () => {
     await api.auth.logout();
     setCurrentUser(null);
+    setCurrentTab('play');
     loadData();
   };
 
@@ -283,6 +284,7 @@ export default function App() {
               setCurrentTab('admin');
             }}
             onBack={() => setCurrentTab('play')}
+            onLogout={handleLogout}
           />
         ) : (
           <AdminPanel
@@ -294,6 +296,7 @@ export default function App() {
             onSaveCategories={handleSaveCategories}
             onSaveQuestions={handleSaveQuestions}
             onResetAllData={handleResetAllData}
+            adminViewMode={adminViewMode}
             onPlayCategory={(cat) => {
               setActiveCategory(cat);
               setCurrentTab('play');

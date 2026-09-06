@@ -271,4 +271,38 @@ export const api = {
       });
     },
   },
+
+  // File uploads
+  upload: {
+    async image(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const base64Data = reader.result as string;
+            const res = await fetch('/api/upload-image', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                data: base64Data,
+                filename: file.name,
+              }),
+            });
+            if (!res.ok) {
+              const errorData = await res.json().catch(() => ({}));
+              throw new Error(errorData.error || 'Ошибка загрузки изображения');
+            }
+            const data = await res.json();
+            resolve(data.url);
+          } catch (e) {
+            reject(e);
+          }
+        };
+        reader.onerror = () => reject(new Error('Не удалось прочитать файл изображения'));
+        reader.readAsDataURL(file);
+      });
+    },
+  },
 };

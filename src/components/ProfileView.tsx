@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   ArrowLeft,
   Camera,
   ShieldCheck,
   User as UserIcon,
-  Sparkles,
   Trophy,
   Layers,
   Film,
@@ -12,8 +11,9 @@ import {
   Pencil,
   AlertTriangle,
   Save,
-  X,
-  Check,
+  Upload,
+  LogOut,
+  Loader2,
 } from 'lucide-react';
 import { User, Category, VideoQuestion, CategoryStats } from '../types';
 import { api } from '../services/api';
@@ -27,6 +27,7 @@ interface ProfileViewProps {
   onSelectCategory: (category: Category) => void;
   onEditCategory: (categoryId: string) => void;
   onBack: () => void;
+  onLogout: () => void;
 }
 
 const PRESET_BANNERS = [
@@ -54,6 +55,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onSelectCategory,
   onEditCategory,
   onBack,
+  onLogout,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(currentUser.avatarUrl || '');
@@ -62,6 +64,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isUploadingBanner, setIsUploadingBanner] = useState(false);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const bannerFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingAvatar(true);
+    setError(null);
+    try {
+      const url = await api.upload.image(file);
+      setAvatarUrl(url);
+    } catch (err: any) {
+      setError(err.message || 'Ошибка загрузки аватара');
+    } finally {
+      setIsUploadingAvatar(false);
+      if (avatarFileInputRef.current) avatarFileInputRef.current.value = '';
+    }
+  };
+
+  const handleBannerFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingBanner(true);
+    setError(null);
+    try {
+      const url = await api.upload.image(file);
+      setBannerUrl(url);
+    } catch (err: any) {
+      setError(err.message || 'Ошибка загрузки баннера');
+    } finally {
+      setIsUploadingBanner(false);
+      if (bannerFileInputRef.current) bannerFileInputRef.current.value = '';
+    }
+  };
 
   // User's authored themes
   const userCategories = categories.filter(
@@ -117,6 +156,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
       </div>
 
+      {/* Hidden file inputs for avatar & banner upload */}
+      <input
+        ref={avatarFileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={handleAvatarFileSelect}
+      />
+      <input
+        ref={bannerFileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={handleBannerFileSelect}
+      />
+
       {/* Profile Card */}
       <div className="rounded-3xl bg-zinc-900/50 border border-white/[0.08] shadow-2xl overflow-hidden backdrop-blur-xl mb-8">
         {/* Banner */}
@@ -136,9 +191,24 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           {isEditing && (
             <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-              <span className="text-xs bg-black/60 px-3 py-1.5 rounded-full text-zinc-200 backdrop-blur-md">
-                Выберите фон или укажите ссылку
-              </span>
+              <button
+                type="button"
+                onClick={() => bannerFileInputRef.current?.click()}
+                disabled={isUploadingBanner}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/75 hover:bg-black/90 border border-white/20 text-xs font-medium text-white backdrop-blur-md shadow-lg transition-all"
+              >
+                {isUploadingBanner ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Загрузка баннера...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Загрузить свой баннер</span>
+                  </>
+                )}
+              </button>
             </div>
           )}
         </div>
@@ -148,7 +218,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
             {/* Avatar & Ident */}
             <div className="flex items-end gap-4">
-              <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden bg-zinc-800 border-4 border-[#111113] shadow-2xl shrink-0 group">
+              <div
+                onClick={() => {
+                  if (isEditing) avatarFileInputRef.current?.click();
+                }}
+                className={`relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden bg-zinc-800 border-4 border-[#111113] shadow-2xl shrink-0 group ${
+                  isEditing ? 'cursor-pointer' : ''
+                }`}
+                title={isEditing ? 'Нажмите, чтобы загрузить аватар' : undefined}
+              >
                 {avatarUrl ? (
                   <img
                     src={avatarUrl}
@@ -163,8 +241,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 )}
 
                 {isEditing && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-xs opacity-90 backdrop-blur-xs">
-                    <Camera className="w-5 h-5" />
+                  <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white text-[11px] gap-1 opacity-90 backdrop-blur-xs transition-opacity hover:bg-black/75">
+                    {isUploadingAvatar ? (
+                      <Loader2 className="w-5 h-5 animate-spin text-white" />
+                    ) : (
+                      <>
+                        <Camera className="w-5 h-5" />
+                        <span className="text-[10px] font-medium">Сменить фото</span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -204,7 +289,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     Отмена
                   </button>
                   <button
-                    disabled={isSaving}
+                    disabled={isSaving || isUploadingAvatar || isUploadingBanner}
                     onClick={handleSaveProfile}
                     className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-md transition-all disabled:opacity-50"
                   >
@@ -213,13 +298,24 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-xs text-zinc-200 transition-colors"
-                >
-                  <Pencil className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Редактировать профиль</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-xs text-zinc-200 transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Редактировать профиль</span>
+                  </button>
+                  <button
+                    id="profile-logout-btn"
+                    onClick={onLogout}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-xs font-medium text-rose-300 hover:text-rose-200 transition-colors"
+                    title="Выйти из аккаунта"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Выйти</span>
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -250,8 +346,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                  Аватар (ссылка или выберите готовый)
+                  Аватар профиля
                 </label>
+                <div className="flex items-center gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    disabled={isUploadingAvatar}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 text-xs font-medium transition-colors"
+                  >
+                    {isUploadingAvatar ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Загрузка фото...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Загрузить фото с устройства</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-[11px] text-zinc-400">или укажите ссылку:</span>
+                </div>
                 <input
                   type="text"
                   value={avatarUrl}
@@ -286,8 +403,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                  Шапка профиля (градиент или ссылка)
+                  Шапка (баннер) профиля
                 </label>
+                <div className="flex items-center gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => bannerFileInputRef.current?.click()}
+                    disabled={isUploadingBanner}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 text-xs font-medium transition-colors"
+                  >
+                    {isUploadingBanner ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Загрузка баннера...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Загрузить баннер с устройства</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-[11px] text-zinc-400">или выберите градиент / ссылку:</span>
+                </div>
                 <input
                   type="text"
                   value={bannerUrl.startsWith('linear-gradient') ? '' : bannerUrl}
