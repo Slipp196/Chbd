@@ -115,24 +115,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Island: Controls & User */}
         <div className="pointer-events-auto flex items-center gap-2">
-          {/* Admin Mode Switcher Quick Button */}
-          {isUserAdmin && onToggleAdminViewMode && (
-            <button
-              onClick={onToggleAdminViewMode}
-              title={isPreviewingAsUser ? 'Включить режим полного админа' : 'Посмотреть сайт как обычный игрок'}
-              className={`h-10 px-3 rounded-2xl border text-xs font-medium flex items-center gap-1.5 backdrop-blur-xl shadow-lg transition-all ${
-                isPreviewingAsUser
-                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-200 hover:bg-amber-500/30'
-                  : 'bg-zinc-900/85 hover:bg-zinc-800 border-white/10 text-zinc-300'
-              }`}
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">
-                {isPreviewingAsUser ? 'Вид: Гость' : 'Вид: Админ'}
-              </span>
-            </button>
-          )}
-
           {currentUser ? (
             <button
               id="nav-user-profile"
@@ -171,6 +153,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <UserIcon className="w-3.5 h-3.5 text-zinc-400" />
               <span>Войти</span>
+            </button>
+          )}
+
+          {/* Download website button */}
+          {onOpenDownload && (
+            <button
+              id="nav-download-btn"
+              onClick={onOpenDownload}
+              title="Скачать весь сайт (код, сервер и базу данных в ZIP)"
+              className="h-10 px-3 rounded-2xl bg-zinc-900/85 hover:bg-zinc-800/90 border border-white/10 hover:border-white/25 text-xs font-medium text-zinc-200 hover:text-white flex items-center gap-1.5 backdrop-blur-xl shadow-lg transition-all focus:outline-none"
+            >
+              <Download className="w-3.5 h-3.5 text-zinc-300" />
+              <span className="hidden sm:inline">Скачать сайт</span>
             </button>
           )}
 

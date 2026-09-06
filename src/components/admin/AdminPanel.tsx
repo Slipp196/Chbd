@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Lock,
   User as UserIcon,
+  Copy,
 } from 'lucide-react';
 import { Category, VideoQuestion, User } from '../../types';
 import { CategoryModal } from './CategoryModal';
@@ -50,15 +51,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     (currentUser?.role === 'admin' || currentUser?.username?.toLowerCase() === 'slipp1') &&
     adminViewMode !== 'user_preview';
 
-  // Visible categories in creator panel:
-  // Admin sees all themes from everyone.
-  // Normal users ONLY see their own themes!
-  const myCategories = isGlobalAdmin
-    ? categories
-    : categories.filter((c) => currentUser && c.authorId === currentUser.id);
+  // Filter mode: 'all' (all themes, including friend's) or 'my' (only user's own)
+  const [filterMode, setFilterMode] = useState<'all' | 'my'>('all');
+
+  const myCount = currentUser
+    ? categories.filter((c) => c.authorId === currentUser.id).length
+    : 0;
+
+  const displayedCategories =
+    filterMode === 'my' && currentUser
+      ? categories.filter((c) => c.authorId === currentUser.id)
+      : categories;
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
-    initialSelectedCategoryId || myCategories[0]?.id || ''
+    initialSelectedCategoryId || categories[0]?.id || ''
   );
 
   // Modals state
@@ -71,9 +77,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [confirmDeleteCatId, setConfirmDeleteCatId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Active Category (from myCategories)
+  // Active Category (from all categories or displayed)
   const activeCategory =
-    myCategories.find((c) => c.id === selectedCategoryId) || myCategories[0] || null;
+    categories.find((c) => c.id === selectedCategoryId) ||
+    displayedCategories[0] ||
+    categories[0] ||
+    null;
 
   // Filter questions for active category
   const activeQuestions = questions.filter(
@@ -156,10 +165,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     api.categories.delete(catId).catch(console.error);
 
     if (selectedCategoryId === catId) {
-      const remainingMyCats = myCategories.filter((c) => c.id !== catId);
-      setSelectedCategoryId(remainingMyCats[0]?.id || '');
+      const remaining = categories.filter((c) => c.id !== catId);
+      setSelectedCategoryId(remaining[0]?.id || '');
     }
     setConfirmDeleteCatId(null);
+  };
+
+  // Duplicate / Clone a category (e.g. from a friend) to become user's own editable theme
+  const handleDuplicateCategory = (cat: Category) => {
+    const newId = `cat_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const clonedCat: Category = {
+      ...cat,
+      id: newId,
+      title: `${cat.title} (моя копия)`,
+      authorId: currentUser?.id,
+      authorName: currentUser?.username,
+      createdAt: Date.now(),
+    };
+    const catQuestions = questions.filter((q) => q.categoryId === cat.id);
+    const clonedQuestions = catQuestions.map((q) => ({
+      ...q,
+      id: `q_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      categoryId: newId,
+      authorId: currentUser?.id,
+    }));
+
+    onSaveCategories([...categories, clonedCat]);
+    if (clonedQuestions.length > 0) {
+      onSaveQuestions([...questions, ...clonedQuestions]);
+    }
+    setSelectedCategoryId(newId);
   };
 
   // Questions CRUD
@@ -235,64 +270,113 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       )}
 
       {/* Clean Top Header */}
-      <div className="flex items-center justify-between gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-7">
         <div>
-          <h2 className="text-xl font-bold text-zinc-100 tracking-tight">
+          <h2 className="text-2xl font-bold text-white tracking-tight">
             Создать ЧБД
           </h2>
-          <p className="text-xs text-zinc-400 mt-0.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400 mt-1">
             {currentUser ? (
-              <span>Вы вошли как <strong className="text-zinc-200">@{currentUser.username}</strong></span>
+              <span className="flex items-center gap-1.5">
+                <span>Вы вошли как</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-200 border border-white/10 font-medium">
+                  @{currentUser.username}
+                </span>
+                {currentUser.role === 'admin' && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold">
+                    Администратор
+                  </span>
+                )}
+              </span>
             ) : (
               <span>Войдите, чтобы ваши созданные темы принадлежали вам</span>
             )}
-          </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-start sm:self-center">
           <button
             onClick={handleOpenNewCategory}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-sm transition-all focus:outline-none"
+            className="inline-flex items-center gap-2 h-10 px-4.5 rounded-2xl bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-bold shadow-md transition-all hover:scale-[1.02] active:scale-[0.98] focus:outline-none"
           >
-            <FolderPlus className="w-4 h-4" />
+            <FolderPlus className="w-4 h-4 text-zinc-950" />
             <span>Новая тема</span>
           </button>
         </div>
       </div>
 
       {/* Two-Column Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
-        {/* Left Column: Categories List */}
-        <div className="md:col-span-4 space-y-2.5">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-              {isGlobalAdmin ? `Все темы (${myCategories.length})` : `Мои темы (${myCategories.length})`}
-            </span>
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Categories List Container */}
+        <div className="md:col-span-4 rounded-3xl bg-zinc-900/40 border border-white/[0.08] backdrop-blur-md p-4 min-h-[480px] flex flex-col shadow-xl">
+          {/* Filter Mode Switcher */}
+          <div className="flex items-center gap-1 bg-zinc-950/40 p-1 rounded-2xl border border-white/[0.08] mb-3">
+            <button
+              type="button"
+              onClick={() => setFilterMode('all')}
+              className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                filterMode === 'all'
+                  ? 'bg-zinc-800 text-white shadow-xs'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              Все темы ({categories.length})
+            </button>
+            {currentUser && (
+              <button
+                type="button"
+                onClick={() => setFilterMode('my')}
+                className={`flex-1 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+                  filterMode === 'my'
+                    ? 'bg-zinc-800 text-white shadow-xs'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Мои ({myCount})
+              </button>
+            )}
           </div>
 
-          <div className="space-y-1.5">
-            {myCategories.length === 0 ? (
-              <div className="p-4 rounded-2xl bg-zinc-900/40 border border-white/[0.06] text-center space-y-2.5">
-                <p className="text-xs text-zinc-400">
-                  {currentUser
-                    ? 'У вас пока нет созданных тем ЧБД. Нажмите кнопку «Новая тема» выше, чтобы создать свою тему!'
-                    : 'Войдите в аккаунт, чтобы создавать темы ЧБД и загружать клипы.'}
+          <div className="flex-1 flex flex-col">
+            {displayedCategories.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-6 text-center rounded-2xl bg-zinc-950/25 border border-dashed border-white/10 my-auto">
+                <div className="w-12 h-12 rounded-2xl bg-zinc-800/80 border border-white/10 flex items-center justify-center text-zinc-400 mb-3 shadow-inner">
+                  <FolderPlus className="w-6 h-6 text-zinc-400" />
+                </div>
+                <h4 className="text-xs font-semibold text-zinc-200 mb-1">
+                  {filterMode === 'my' ? 'У вас нет своих тем' : 'Темы не созданы'}
+                </h4>
+                <p className="text-[11px] text-zinc-400 leading-relaxed max-w-[200px] mb-4">
+                  {filterMode === 'my'
+                    ? 'Создайте свою тему ЧБД или переключитесь на «Все темы».'
+                    : 'Нажмите кнопку ниже, чтобы создать первую тему!'}
                 </p>
-                {!currentUser && (
+                {currentUser ? (
+                  <button
+                    type="button"
+                    onClick={handleOpenNewCategory}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/10 text-xs font-medium transition-all shadow-xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Создать тему</span>
+                  </button>
+                ) : (
                   <button
                     type="button"
                     onClick={onRequireAuth}
-                    className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium transition-all shadow-xs"
                   >
-                    Войти в аккаунт
+                    <span>Войти в аккаунт</span>
                   </button>
                 )}
               </div>
             ) : (
-              myCategories.map((cat) => {
+              <div className="space-y-1.5 overflow-y-auto max-h-[580px] pr-1">
+                {displayedCategories.map((cat) => {
                 const isSelected = activeCategory?.id === cat.id;
                 const count = questions.filter((q) => q.categoryId === cat.id).length;
                 const userOwnsCat = canEditCategory(cat);
+                const isMyCat = currentUser && cat.authorId === currentUser.id;
 
                 return (
                   <div
@@ -323,15 +407,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                     )}
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <h4 className="text-xs font-semibold truncate leading-snug">{cat.title}</h4>
+                        {isMyCat ? (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-purple-500/20 text-purple-300 font-medium shrink-0">
+                            Моя
+                          </span>
+                        ) : cat.authorName ? (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-white/5 text-zinc-400 font-medium shrink-0 truncate max-w-[80px]">
+                            @{cat.authorName}
+                          </span>
+                        ) : null}
                         {!userOwnsCat && (
                           <Lock className="w-3 h-3 text-zinc-400 shrink-0" title="Только автор может редактировать" />
                         )}
                       </div>
                       <p className="text-[11px] text-zinc-400 truncate">
                         {count} {count === 1 ? 'клип' : count >= 2 && count <= 4 ? 'клипа' : 'клипов'}
-                        {cat.authorName && ` • @${cat.authorName}`}
+                        {cat.authorName && !isMyCat && ` • от друга`}
                       </p>
                     </div>
                   </div>
@@ -366,14 +459,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         </button>
                       </>
                     ) : (
-                      <span className="p-1 text-zinc-500 text-[10px]" title="Чужая тема">
-                        <Lock className="w-3.5 h-3.5" />
-                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDuplicateCategory(cat);
+                        }}
+                        className="p-1 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-purple-300 transition-colors"
+                        title="Скопировать тему себе для редактирования"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
                     )}
                   </div>
                 </div>
               );
-            }))}
+            })}
+              </div>
+            )}
           </div>
 
           {/* Delete Category Confirmation */}
@@ -450,13 +553,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                 {/* Top action buttons */}
                 <div className="flex items-center gap-2">
+                  {/* Clone button if user does not own this category */}
+                  {!canEditActiveCategory && currentUser && (
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicateCategory(activeCategory)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 text-xs font-medium border border-purple-500/30 transition-colors focus:outline-none"
+                      title="Скопировать тему себе, чтобы редактировать и добавлять свои клипы"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Скопировать себе</span>
+                    </button>
+                  )}
+
                   {activeQuestions.length > 0 && (
                     <button
                       onClick={() => onPlayCategory(activeCategory)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-white/10 transition-colors focus:outline-none"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>Тест</span>
+                      <span>Играть</span>
                     </button>
                   )}
 
@@ -594,26 +710,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center p-12 rounded-3xl bg-zinc-900/40 border border-white/[0.06] text-center">
-              <Layers className="w-12 h-12 text-zinc-600 mb-3" />
-              <h3 className="text-sm font-semibold text-zinc-200">Нет выбранной темы</h3>
-              <p className="text-xs text-zinc-400 max-w-sm mt-1 mb-4">
+            <div className="relative rounded-3xl bg-zinc-900/40 border border-white/[0.08] backdrop-blur-md p-8 sm:p-14 min-h-[480px] flex flex-col items-center justify-center text-center overflow-hidden shadow-xl">
+              {/* Subtle ambient glow */}
+              <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Icon Badge */}
+              <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-b from-zinc-800 to-zinc-900 border border-white/10 flex items-center justify-center text-zinc-300 shadow-xl mb-4.5">
+                <Layers className="w-8 h-8 text-zinc-300 stroke-[1.75]" />
+              </div>
+
+              <h3 className="relative text-xl font-bold text-white tracking-tight mb-2">
+                Нет выбранной темы
+              </h3>
+
+              <p className="relative text-xs sm:text-sm text-zinc-400 max-w-sm sm:max-w-md mx-auto leading-relaxed mb-6 font-normal">
                 {currentUser
-                  ? 'Создайте новую тему, чтобы наполнить её клипами и вариантами ответов.'
+                  ? 'Создайте новую тему ЧБД или выберите существующую в списке слева, чтобы наполнить её клипами и вариантами ответов.'
                   : 'Войдите в аккаунт, чтобы создавать свои темы и делиться ими с другими игроками.'}
               </p>
+
               {currentUser ? (
                 <button
                   onClick={handleOpenNewCategory}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white hover:bg-zinc-100 text-zinc-950 text-xs font-semibold shadow-sm transition-all"
+                  className="relative inline-flex items-center gap-2 h-11 px-6 rounded-2xl bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-bold shadow-lg transition-all hover:scale-105 active:scale-95 focus:outline-none"
                 >
-                  <FolderPlus className="w-4 h-4" />
+                  <FolderPlus className="w-4 h-4 text-zinc-950 stroke-[2.5]" />
                   <span>Создать новую тему</span>
                 </button>
               ) : (
                 <button
                   onClick={onRequireAuth}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-all"
+                  className="relative inline-flex items-center gap-2 h-11 px-6 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-lg transition-all hover:scale-105 active:scale-95 focus:outline-none"
                 >
                   <UserIcon className="w-4 h-4" />
                   <span>Войти в аккаунт</span>

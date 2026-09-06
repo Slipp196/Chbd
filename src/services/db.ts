@@ -9,13 +9,57 @@ const STORAGE_KEYS = {
   STATS: 'chbd_stats_v3',
 };
 
-// Clean up legacy storage from old demo version if present
+// Migrate legacy storage from older versions if present so no user/friend categories are lost
 if (typeof window !== 'undefined') {
   try {
-    ['chbd_categories_v2', 'chbd_categories_v1', 'chbd_questions_v2', 'chbd_questions_v1'].forEach((key) => {
-      localStorage.removeItem(key);
-    });
-  } catch {}
+    const legacyCategoryKeys = ['chbd_categories_v2', 'chbd_categories_v1', 'chbd_categories'];
+    const currentCatsRaw = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+    let currentCats: Category[] = currentCatsRaw ? JSON.parse(currentCatsRaw) : [];
+
+    for (const key of legacyCategoryKeys) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const parsed: Category[] = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((cat) => {
+              if (!DEMO_CATEGORY_IDS.has(cat.id) && !currentCats.some((c) => c.id === cat.id)) {
+                currentCats.push(cat);
+              }
+            });
+          }
+        } catch {}
+      }
+    }
+    if (currentCats.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(currentCats));
+    }
+
+    const legacyQuestionKeys = ['chbd_questions_v2', 'chbd_questions_v1', 'chbd_questions'];
+    const currentQuestionsRaw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+    let currentQuestions: VideoQuestion[] = currentQuestionsRaw ? JSON.parse(currentQuestionsRaw) : [];
+
+    for (const key of legacyQuestionKeys) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const parsed: VideoQuestion[] = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((q) => {
+              if (!DEMO_QUESTION_IDS.has(q.id) && !currentQuestions.some((item) => item.id === q.id)) {
+                currentQuestions.push(q);
+              }
+            });
+          }
+        } catch {}
+      }
+    }
+    if (currentQuestions.length > 0) {
+      localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(currentQuestions));
+    }
+  } catch (e) {
+    console.warn('Storage migration warning:', e);
+  }
 }
 
 const DB_NAME = 'chbd_video_store';

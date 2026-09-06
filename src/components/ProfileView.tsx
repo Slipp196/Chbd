@@ -30,20 +30,31 @@ interface ProfileViewProps {
   onLogout: () => void;
 }
 
-const PRESET_BANNERS = [
-  'linear-gradient(135deg, #18181b 0%, #27272a 50%, #09090b 100%)',
-  'linear-gradient(135deg, #09203f 0%, #537895 100%)',
-  'linear-gradient(135deg, #2b1055 0%, #7597de 100%)',
-  'linear-gradient(135deg, #1f1c2c 0%, #928dab 100%)',
-  'linear-gradient(135deg, #16222a 0%, #3a6073 100%)',
-];
-
-const PRESET_AVATARS = [
-  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-  'https://images.unsplash.com/photo-1628157582853-a796fa650a6a?w=150&auto=format&fit=crop&q=80',
+export const PRESET_BANNERS = [
+  // 1. Чистый белый баннер (white banner)
+  { label: 'Белый минимал', value: 'linear-gradient(135deg, #ffffff 0%, #f4f4f5 50%, #e4e4e7 100%)' },
+  // 2. Темный карбон
+  { label: 'Карбон', value: 'linear-gradient(135deg, #18181b 0%, #27272a 50%, #09090b 100%)' },
+  // 3. Глубокий черный OLED
+  { label: 'Глубокий черный', value: 'linear-gradient(135deg, #050505 0%, #111113 50%, #1a1a1e 100%)' },
+  // 4. Королевский аметист (фиолетовый)
+  { label: 'Аметист', value: 'linear-gradient(135deg, #2e0854 0%, #581c87 50%, #9333ea 100%)' },
+  // 5. Индиго
+  { label: 'Индиго', value: 'linear-gradient(135deg, #1e1b4b 0%, #4338ca 50%, #6366f1 100%)' },
+  // 6. Полуночный сапфир (синий)
+  { label: 'Сапфир', value: 'linear-gradient(135deg, #09203f 0%, #1e3a8a 50%, #3b82f6 100%)' },
+  // 7. Кибернетический циан
+  { label: 'Циан', value: 'linear-gradient(135deg, #083344 0%, #0e7490 50%, #06b6d4 100%)' },
+  // 8. Изумрудный лес (зеленый)
+  { label: 'Изумруд', value: 'linear-gradient(135deg, #022c22 0%, #065f46 50%, #10b981 100%)' },
+  // 9. Рубиновый бархат (красный)
+  { label: 'Рубин', value: 'linear-gradient(135deg, #450a0a 0%, #991b1b 50%, #ef4444 100%)' },
+  // 10. Янтарное золото (оранжевый)
+  { label: 'Янтарь', value: 'linear-gradient(135deg, #451a03 0%, #b45309 50%, #f59e0b 100%)' },
+  // 11. Неоновая фуксия (розовый)
+  { label: 'Фуксия', value: 'linear-gradient(135deg, #500724 0%, #9d174d 50%, #ec4899 100%)' },
+  // 12. Платиновый графит
+  { label: 'Графит', value: 'linear-gradient(135deg, #1e293b 0%, #334155 50%, #64748b 100%)' },
 ];
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -59,7 +70,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(currentUser.avatarUrl || '');
-  const [bannerUrl, setBannerUrl] = useState(currentUser.bannerUrl || PRESET_BANNERS[0]);
+  const [bannerUrl, setBannerUrl] = useState(currentUser.bannerUrl || PRESET_BANNERS[0].value);
   const [bio, setBio] = useState(currentUser.bio || '');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -78,6 +89,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     try {
       const url = await api.upload.image(file);
       setAvatarUrl(url);
+      const updated = await api.user.updateProfile({ avatarUrl: url });
+      onUpdateUser(updated);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
       setError(err.message || 'Ошибка загрузки аватара');
     } finally {
@@ -94,6 +109,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     try {
       const url = await api.upload.image(file);
       setBannerUrl(url);
+      const updated = await api.user.updateProfile({ bannerUrl: url });
+      onUpdateUser(updated);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
       setError(err.message || 'Ошибка загрузки баннера');
     } finally {
@@ -141,7 +160,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
-  const isBannerGradient = bannerUrl.startsWith('linear-gradient');
+  const isBannerColorOrGradient =
+    bannerUrl.startsWith('linear-gradient') ||
+    bannerUrl.startsWith('#') ||
+    bannerUrl.startsWith('rgb');
+  const isWhiteBanner =
+    bannerUrl.toLowerCase().includes('#ffffff') ||
+    bannerUrl.toLowerCase().includes('#f8fafc');
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-2 pb-16">
@@ -178,7 +203,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <div
           className="w-full h-44 sm:h-56 relative transition-all"
           style={
-            isBannerGradient
+            isBannerColorOrGradient
               ? { background: bannerUrl }
               : {
                   backgroundImage: `url(${bannerUrl})`,
@@ -187,30 +212,36 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 }
           }
         >
-          <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent" />
+          <div
+            className={`absolute inset-0 pointer-events-none transition-all ${
+              isWhiteBanner
+                ? 'bg-gradient-to-t from-zinc-950/85 via-zinc-950/20 to-transparent'
+                : 'bg-gradient-to-t from-zinc-950 via-zinc-950/40 to-transparent'
+            }`}
+          />
 
-          {isEditing && (
-            <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-              <button
-                type="button"
-                onClick={() => bannerFileInputRef.current?.click()}
-                disabled={isUploadingBanner}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/75 hover:bg-black/90 border border-white/20 text-xs font-medium text-white backdrop-blur-md shadow-lg transition-all"
-              >
-                {isUploadingBanner ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Загрузка баннера...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Загрузить свой баннер</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
+          {/* Banner Upload Button (Always accessible) */}
+          <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+            <button
+              type="button"
+              onClick={() => bannerFileInputRef.current?.click()}
+              disabled={isUploadingBanner}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/65 hover:bg-black/85 border border-white/20 text-xs font-medium text-white backdrop-blur-md shadow-lg transition-all focus:outline-none"
+              title="Загрузить баннер для профиля"
+            >
+              {isUploadingBanner ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Загрузка...</span>
+                </>
+              ) : (
+                <>
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Сменить баннер</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Header Details */}
@@ -219,20 +250,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {/* Avatar & Ident */}
             <div className="flex items-end gap-4">
               <div
-                onClick={() => {
-                  if (isEditing) avatarFileInputRef.current?.click();
-                }}
-                className={`relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden bg-zinc-800 border-4 border-[#111113] shadow-2xl shrink-0 group ${
-                  isEditing ? 'cursor-pointer' : ''
-                }`}
-                title={isEditing ? 'Нажмите, чтобы загрузить аватар' : undefined}
+                onClick={() => avatarFileInputRef.current?.click()}
+                className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden bg-zinc-800 border-4 border-[#111113] shadow-2xl shrink-0 group cursor-pointer"
+                title="Нажмите, чтобы загрузить аватар"
               >
                 {avatarUrl ? (
                   <img
                     src={avatarUrl}
                     alt={currentUser.username}
                     referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-zinc-800 text-zinc-400">
@@ -240,18 +267,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                 )}
 
-                {isEditing && (
-                  <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white text-[11px] gap-1 opacity-90 backdrop-blur-xs transition-opacity hover:bg-black/75">
-                    {isUploadingAvatar ? (
-                      <Loader2 className="w-5 h-5 animate-spin text-white" />
-                    ) : (
-                      <>
-                        <Camera className="w-5 h-5" />
-                        <span className="text-[10px] font-medium">Сменить фото</span>
-                      </>
-                    )}
-                  </div>
-                )}
+                {/* Always-available Hover Overlay for Avatar Upload */}
+                <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center text-white text-[11px] gap-1 opacity-0 group-hover:opacity-100 backdrop-blur-xs transition-opacity">
+                  {isUploadingAvatar ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-white" />
+                  ) : (
+                    <>
+                      <Camera className="w-5 h-5" />
+                      <span className="text-[10px] font-medium">Сменить фото</span>
+                    </>
+                  )}
+                </div>
+
+                {/* Small camera badge if not hovered */}
+                <div className="absolute bottom-1 right-1 p-1 rounded-lg bg-black/70 text-white border border-white/20 group-hover:opacity-0 transition-opacity">
+                  <Camera className="w-3 h-3" />
+                </div>
               </div>
 
               <div className="pb-1">
@@ -280,7 +311,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     onClick={() => {
                       setIsEditing(false);
                       setAvatarUrl(currentUser.avatarUrl || '');
-                      setBannerUrl(currentUser.bannerUrl || PRESET_BANNERS[0]);
+                      setBannerUrl(currentUser.bannerUrl || PRESET_BANNERS[0].value);
                       setBio(currentUser.bio || '');
                       setError(null);
                     }}
@@ -377,26 +408,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-white/10 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-white/30 mb-2"
                 />
                 <div className="flex items-center gap-2">
-                  {PRESET_AVATARS.map((preset, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setAvatarUrl(preset)}
-                      className={`w-8 h-8 rounded-xl overflow-hidden border-2 transition-all ${
-                        avatarUrl === preset ? 'border-white scale-105' : 'border-transparent opacity-60 hover:opacity-100'
-                      }`}
-                    >
-                      <img src={preset} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                    </button>
-                  ))}
-                  {avatarUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setAvatarUrl('')}
-                      className="px-2 py-1 rounded-lg text-[11px] text-zinc-400 hover:text-zinc-200"
-                    >
-                      Сбросить
-                    </button>
+                  <span className="text-[11px] text-zinc-400">Текущий аватар:</span>
+                  {avatarUrl ? (
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={avatarUrl}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        className="w-8 h-8 rounded-xl object-cover border border-white/20"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAvatarUrl('')}
+                        className="px-2.5 py-1 rounded-lg text-xs text-zinc-400 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+                      >
+                        Сбросить фото
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-zinc-500">По умолчанию (буква имени)</span>
                   )}
                 </div>
               </div>
@@ -420,32 +450,51 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     ) : (
                       <>
                         <Upload className="w-3.5 h-3.5" />
-                        <span>Загрузить баннер с устройства</span>
+                        <span>Загрузить свой баннер</span>
                       </>
                     )}
                   </button>
-                  <span className="text-[11px] text-zinc-400">или выберите градиент / ссылку:</span>
+                  <span className="text-[11px] text-zinc-400">или выберите цвет / вставьте ссылку:</span>
                 </div>
                 <input
                   type="text"
-                  value={bannerUrl.startsWith('linear-gradient') ? '' : bannerUrl}
+                  value={isBannerColorOrGradient ? '' : bannerUrl}
                   onChange={(e) => setBannerUrl(e.target.value)}
                   placeholder="https://... (прямая ссылка на изображение для фона)"
-                  className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-white/10 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-white/30 mb-2"
+                  className="w-full px-3.5 py-2 rounded-xl bg-zinc-900 border border-white/10 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-white/30 mb-2.5"
                 />
-                <div className="flex items-center gap-2">
-                  {PRESET_BANNERS.map((grad, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setBannerUrl(grad)}
-                      style={{ background: grad }}
-                      className={`w-8 h-6 rounded-lg border-2 transition-all ${
-                        bannerUrl === grad ? 'border-white scale-105' : 'border-transparent opacity-70 hover:opacity-100'
-                      }`}
-                      title={`Градиент #${idx + 1}`}
-                    />
-                  ))}
+
+                {/* Color and Gradient Presets */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] text-zinc-400 font-medium">Цветовые стили шапки:</span>
+                  <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-12 gap-2">
+                    {PRESET_BANNERS.map((preset, idx) => {
+                      const isSelected = bannerUrl === preset.value;
+                      const isWhite = preset.label.toLowerCase().includes('белый');
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setBannerUrl(preset.value)}
+                          style={{ background: preset.value }}
+                          className={`group relative h-9 rounded-xl transition-all duration-200 cursor-pointer ${
+                            isWhite ? 'border border-zinc-400/50 shadow-sm' : 'border border-white/10'
+                          } ${
+                            isSelected
+                              ? 'ring-2 ring-white ring-offset-2 ring-offset-zinc-950 scale-105 shadow-md'
+                              : 'opacity-80 hover:opacity-100 hover:scale-102'
+                          }`}
+                          title={preset.label}
+                        >
+                          {isSelected && (
+                            <span className="absolute inset-0 flex items-center justify-center">
+                              <span className={`w-1.5 h-1.5 rounded-full ${isWhite ? 'bg-zinc-950' : 'bg-white'}`} />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>

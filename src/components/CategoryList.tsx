@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Search, HelpCircle } from 'lucide-react';
+import { Plus, Search, HelpCircle, X } from 'lucide-react';
 import { Category, VideoQuestion, CategoryStats } from '../types';
 import { CategoryCard } from './CategoryCard';
 
@@ -36,25 +36,36 @@ export const CategoryList: React.FC<CategoryListProps> = ({
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-4 pb-12">
+    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-5 pb-16">
       {/* Sleek Minimal Controls Bar: Search & Quick Add */}
-      <div className="flex items-center justify-between gap-3 mb-6">
-        <div className="flex-1 max-w-sm">
+      <div className="flex items-center justify-between gap-3 sm:gap-4 mb-8">
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Поиск тем..."
-            className="w-full px-4 py-2.5 rounded-2xl bg-zinc-900/60 border border-white/[0.08] text-xs text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-white/20 transition-all backdrop-blur-md"
+            className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-zinc-900/70 border border-white/10 text-xs text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-white/25 focus:ring-1 focus:ring-white/15 transition-all backdrop-blur-md"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-white/10 text-zinc-400 hover:text-white transition-colors"
+              title="Очистить"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         <button
           onClick={onOpenAdminTab}
-          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-200 hover:text-white border border-white/10 text-xs font-medium transition-all backdrop-blur-md shadow-sm focus:outline-none"
+          className="inline-flex items-center gap-2 px-4 sm:px-4.5 py-2.5 rounded-2xl bg-zinc-800/90 hover:bg-zinc-750 text-zinc-200 hover:text-white border border-white/10 text-xs font-semibold transition-all backdrop-blur-md shadow-xs hover:scale-[1.02] active:scale-[0.98] focus:outline-none shrink-0"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Создать тему</span>
+          <Plus className="w-4 h-4" />
+          <span>Создать тему</span>
         </button>
       </div>
 
@@ -73,22 +84,37 @@ export const CategoryList: React.FC<CategoryListProps> = ({
           ))}
         </div>
       ) : (
-        <div className="text-center py-20 px-4 rounded-3xl bg-zinc-900/30 border border-dashed border-white/10 max-w-lg mx-auto">
-          <HelpCircle className="w-10 h-10 text-zinc-400 mx-auto mb-3" />
-          <h3 className="text-base font-semibold text-zinc-200 mb-1.5">
+        <div className="relative max-w-xl mx-auto my-6 p-8 sm:p-12 rounded-3xl bg-zinc-900/40 border border-white/[0.08] backdrop-blur-xl shadow-2xl text-center flex flex-col items-center justify-center overflow-hidden">
+          {/* Subtle ambient light */}
+          <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-64 h-64 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Icon Badge */}
+          <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-b from-zinc-800 to-zinc-900 border border-white/10 flex items-center justify-center text-zinc-300 shadow-xl mb-4.5">
+            <HelpCircle className="w-8 h-8 text-zinc-300 stroke-[1.75]" />
+          </div>
+
+          <h3 className="relative text-xl font-bold text-white tracking-tight mb-2">
             {searchQuery ? 'Ничего не найдено' : 'Темы пока не созданы'}
           </h3>
-          <p className="text-xs text-zinc-400 max-w-sm mx-auto mb-5 leading-relaxed">
+
+          <p className="relative text-xs sm:text-sm text-zinc-400 max-w-md mx-auto leading-relaxed mb-6 font-normal">
             {searchQuery
-              ? 'Попробуйте изменить поисковый запрос'
+              ? 'Попробуйте изменить поисковый запрос или очистить фильтр, чтобы увидеть все доступные темы.'
               : 'Создайте первую тему с видеороликами, таймкодами пауз и вариантами ответов, чтобы начать играть с друзьями!'}
           </p>
+
           <button
-            onClick={onOpenAdminTab}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-md transition-all focus:outline-none"
+            onClick={() => {
+              if (searchQuery) {
+                setSearchQuery('');
+              } else {
+                onOpenAdminTab();
+              }
+            }}
+            className="relative inline-flex items-center gap-2 h-11 px-6 rounded-2xl bg-white hover:bg-zinc-200 text-zinc-950 text-xs font-bold shadow-lg transition-all hover:scale-105 active:scale-95 focus:outline-none"
           >
-            <Plus className="w-4 h-4" />
-            <span>Создать первую тему</span>
+            <Plus className="w-4 h-4 text-zinc-950 stroke-[2.5]" />
+            <span>{searchQuery ? 'Очистить поиск' : 'Создать первую тему'}</span>
           </button>
         </div>
       )}
