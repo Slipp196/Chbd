@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Category, VideoQuestion, CategoryStats, User } from './types';
 import {
   getStoredCategories,
@@ -15,17 +15,19 @@ import { CategoryList } from './components/CategoryList';
 import { GamePlayer } from './components/GamePlayer';
 import { GameCompleteModal } from './components/GameCompleteModal';
 import { AdminPanel } from './components/admin/AdminPanel';
+import { ProfileView } from './components/ProfileView';
 import { AuthModal } from './components/AuthModal';
 import { DownloadModal } from './components/DownloadModal';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<'play' | 'admin'>('play');
+  const [currentTab, setCurrentTab] = useState<'play' | 'admin' | 'profile'>('play');
   const [categories, setCategories] = useState<Category[]>([]);
   const [questions, setQuestions] = useState<VideoQuestion[]>([]);
   const [stats, setStats] = useState<Record<string, CategoryStats>>({});
 
-  // Auth & Download modal states
+  // Auth & Admin states
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [adminViewMode, setAdminViewMode] = useState<'admin' | 'user_preview'>('admin');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState<boolean>(false);
 
@@ -42,8 +44,10 @@ export default function App() {
   // Admin routing helper
   const [adminSelectedCategoryId, setAdminSelectedCategoryId] = useState<string | null>(null);
 
-  // Load initial data from Backend API, with seamless local storage fallback
-  const loadData = async () => {
+  // Load data from Backend API (Server is authoritative; does NOT resurrect deleted items)
+  const loadData = useCallback(async (overrideViewMode?: 'admin' | 'user_preview') => {
+    const viewModeToUse = overrideViewMode || adminViewMode;
+
     // 1. Auth check
     try {
       const user = await api.auth.getMe();
@@ -54,37 +58,13 @@ export default function App() {
 
     // 2. Categories
     try {
-      const remoteCategories = await api.categories.getAll();
-      const localCategories = getStoredCategories();
-
+      const remoteCategories = await api.categories.getAll(viewModeToUse);
       const cleanRemote = Array.isArray(remoteCategories)
         ? remoteCategories.filter((c) => c.id !== 'cat_extreme' && c.id !== 'cat_twitch' && c.id !== 'cat_tiktok')
         : [];
-      const cleanLocal = Array.isArray(localCategories)
-        ? localCategories.filter((c) => c.id !== 'cat_extreme' && c.id !== 'cat_twitch' && c.id !== 'cat_tiktok')
-        : [];
 
-      if (cleanRemote.length > 0) {
-        // Server has categories! Merge any local category created by user
-        const remoteIds = new Set(cleanRemote.map((c) => c.id));
-        const missingOnRemote = cleanLocal.filter((c) => !remoteIds.has(c.id));
-        if (missingOnRemote.length > 0) {
-          const merged = [...cleanRemote, ...missingOnRemote];
-          setCategories(merged);
-          saveCategories(merged);
-          api.categories.sync(merged).catch(console.error);
-        } else {
-          setCategories(cleanRemote);
-          saveCategories(cleanRemote);
-        }
-      } else if (cleanLocal.length > 0) {
-        // Server database is empty, but local has data! Sync local data to server
-        setCategories(cleanLocal);
-        api.categories.sync(cleanLocal).catch(console.error);
-      } else {
-        setCategories([]);
-        saveCategories([]);
-      }
+      setCategories(cleanRemote);
+      saveCategories(cleanRemote);
     } catch {
       setCategories(getStoredCategories());
     }
@@ -92,8 +72,6 @@ export default function App() {
     // 3. Questions
     try {
       const remoteQuestions = await api.questions.getAll();
-      const localQuestions = getStoredQuestions();
-
       const cleanRemote = Array.isArray(remoteQuestions)
         ? remoteQuestions.filter(
             (q) =>
@@ -101,33 +79,9 @@ export default function App() {
               !['cat_extreme', 'cat_twitch', 'cat_tiktok'].includes(q.categoryId)
           )
         : [];
-      const cleanLocal = Array.isArray(localQuestions)
-        ? localQuestions.filter(
-            (q) =>
-              !['q_bike_1', 'q_bike_2', 'q_bike_3', 'q_twitch_1', 'q_tiktok_1'].includes(q.id) &&
-              !['cat_extreme', 'cat_twitch', 'cat_tiktok'].includes(q.categoryId)
-          )
-        : [];
 
-      if (cleanRemote.length > 0) {
-        const remoteIds = new Set(cleanRemote.map((q) => q.id));
-        const missingOnRemote = cleanLocal.filter((q) => !remoteIds.has(q.id));
-        if (missingOnRemote.length > 0) {
-          const merged = [...cleanRemote, ...missingOnRemote];
-          setQuestions(merged);
-          saveQuestions(merged);
-          api.questions.sync(merged).catch(console.error);
-        } else {
-          setQuestions(cleanRemote);
-          saveQuestions(cleanRemote);
-        }
-      } else if (cleanLocal.length > 0) {
-        setQuestions(cleanLocal);
-        api.questions.sync(cleanLocal).catch(console.error);
-      } else {
-        setQuestions([]);
-        saveQuestions([]);
-      }
+      setQuestions(cleanRemote);
+      saveQuestions(cleanRemote);
     } catch {
       setQuestions(getStoredQuestions());
     }
@@ -143,21 +97,28 @@ export default function App() {
     } catch {
       setStats(getCategoryStats());
     }
-  };
+  }, [adminViewMode]);
 
   useEffect(() => {
     loadData();
 
-    // Auto-refresh when switching back to tab or every 8 seconds so friend's themes appear live
+    // Auto-refresh when switching back to window or periodically
     const handleFocus = () => loadData();
     window.addEventListener('focus', handleFocus);
-    const interval = setInterval(loadData, 8000);
+    const interval = setInterval(() => loadData(), 10000);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
       clearInterval(interval);
     };
-  }, []);
+  }, [loadData]);
+
+  // Toggle admin view mode
+  const handleToggleAdminViewMode = () => {
+    const nextMode = adminViewMode === 'admin' ? 'user_preview' : 'admin';
+    setAdminViewMode(nextMode);
+    loadData(nextMode);
+  };
 
   // Handlers for persistence: save locally AND sync to server immediately
   const handleSaveCategories = async (newCategories: Category[]) => {
@@ -192,6 +153,7 @@ export default function App() {
   const handleLogout = async () => {
     await api.auth.logout();
     setCurrentUser(null);
+    loadData();
   };
 
   // Game lifecycle
@@ -246,7 +208,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#111113] text-zinc-100 flex flex-col selection:bg-zinc-700 selection:text-white">
-      {/* Floating Zen / ChatGPT Header */}
+      {/* Floating Zen Header */}
       <Navbar
         currentTab={currentTab}
         onTabChange={(tab) => {
@@ -260,6 +222,8 @@ export default function App() {
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onLogout={handleLogout}
         onOpenDownload={() => setIsDownloadModalOpen(true)}
+        adminViewMode={adminViewMode}
+        onToggleAdminViewMode={handleToggleAdminViewMode}
       />
 
       {/* Main Content Area */}
@@ -303,6 +267,23 @@ export default function App() {
               />
             )}
           </>
+        ) : currentTab === 'profile' && currentUser ? (
+          <ProfileView
+            currentUser={currentUser}
+            onUpdateUser={(updated) => setCurrentUser(updated)}
+            categories={categories}
+            questions={questions}
+            stats={stats}
+            onSelectCategory={(cat) => {
+              handleSelectCategory(cat);
+              setCurrentTab('play');
+            }}
+            onEditCategory={(catId) => {
+              setAdminSelectedCategoryId(catId);
+              setCurrentTab('admin');
+            }}
+            onBack={() => setCurrentTab('play')}
+          />
         ) : (
           <AdminPanel
             categories={categories}

@@ -9,6 +9,10 @@ interface StoredUser {
   salt: string;
   passwordHash: string;
   createdAt: number;
+  role?: 'admin' | 'user';
+  avatarUrl?: string;
+  bannerUrl?: string;
+  bio?: string;
 }
 
 interface StoredSession {
@@ -104,12 +108,14 @@ class Database {
     const passwordHash = this.hashPassword(password, salt);
     const id = `u_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
+    const isMainAdmin = trimmed.toLowerCase() === 'slipp1';
     const storedUser: StoredUser = {
       id,
       username: trimmed,
       salt,
       passwordHash,
       createdAt: Date.now(),
+      role: isMainAdmin ? 'admin' : 'user',
     };
 
     this.data.users.push(storedUser);
@@ -124,8 +130,21 @@ class Database {
     this.saveData();
 
     return {
-      user: { id, username: trimmed, createdAt: storedUser.createdAt },
+      user: this.toUser(storedUser),
       token,
+    };
+  }
+
+  private toUser(stored: StoredUser): User {
+    const isMainAdmin = stored.username.toLowerCase() === 'slipp1';
+    return {
+      id: stored.id,
+      username: stored.username,
+      createdAt: stored.createdAt,
+      role: isMainAdmin ? 'admin' : (stored.role || 'user'),
+      avatarUrl: stored.avatarUrl,
+      bannerUrl: stored.bannerUrl,
+      bio: stored.bio,
     };
   }
 
@@ -143,6 +162,11 @@ class Database {
       throw new Error('Неверный никнейм или пароль');
     }
 
+    // Ensure slipp1 always has admin role even if registered earlier
+    if (user.username.toLowerCase() === 'slipp1' && user.role !== 'admin') {
+      user.role = 'admin';
+    }
+
     const token = crypto.randomBytes(32).toString('hex');
     this.data.sessions.push({
       token,
@@ -153,7 +177,7 @@ class Database {
     this.saveData();
 
     return {
-      user: { id: user.id, username: user.username, createdAt: user.createdAt },
+      user: this.toUser(user),
       token,
     };
   }
@@ -166,11 +190,29 @@ class Database {
     const user = this.data.users.find((u) => u.id === session.userId);
     if (!user) return null;
 
-    return {
-      id: user.id,
-      username: user.username,
-      createdAt: user.createdAt,
-    };
+    if (user.username.toLowerCase() === 'slipp1' && user.role !== 'admin') {
+      user.role = 'admin';
+      this.saveData();
+    }
+
+    return this.toUser(user);
+  }
+
+  public updateProfile(
+    userId: string,
+    updates: { avatarUrl?: string; bannerUrl?: string; bio?: string }
+  ): User {
+    const user = this.data.users.find((u) => u.id === userId);
+    if (!user) {
+      throw new Error('Пользователь не найден');
+    }
+
+    if (typeof updates.avatarUrl === 'string') user.avatarUrl = updates.avatarUrl;
+    if (typeof updates.bannerUrl === 'string') user.bannerUrl = updates.bannerUrl;
+    if (typeof updates.bio === 'string') user.bio = updates.bio;
+
+    this.saveData();
+    return this.toUser(user);
   }
 
   public logoutUser(token: string): void {
@@ -179,8 +221,35 @@ class Database {
   }
 
   // --- Categories ---
-  public getCategories(): Category[] {
-    return this.data.categories;
+  public getCategories(user?: User | null, adminViewMode: 'admin' | 'user_preview' = 'admin'): Category[] {
+    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    const effectiveIsAdmin = isMainAdmin && adminViewMode === 'admin';
+
+    return this.data.categories.filter((cat) => {
+      // If admin in admin mode: sees everything!
+      if (effectiveIsAdmin) {
+        return true;
+      }
+
+      // If category was removed by admin:
+      if (cat.status === 'removed_by_admin') {
+        // Only visible to the author so the author knows it was removed
+        return user && cat.authorId === user.id;
+      }
+
+      // 1. Author's own categories are visible to author
+      if (user && cat.authorId === user.id) {
+        return true;
+      }
+
+      // 2. Official themes created by slipp1 or system are visible to all
+      if (!cat.authorId || cat.authorName?.toLowerCase() === 'slipp1') {
+        return true;
+      }
+
+      // 3. Other users' themes are hidden from ordinary users!
+      return false;
+    });
   }
 
   public getCategoryById(id: string): Category | undefined {
@@ -225,10 +294,11 @@ class Database {
     }
 
     const category = this.data.categories[index];
+    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
 
-    // Ownership check: only block if category has authorId AND current user has different authorId
-    if (category.authorId && user && category.authorId !== user.id) {
-      throw new Error('Только автор может редактировать эту тему');
+    // Only allow if admin or author
+    if (!isMainAdmin && category.authorId && user && category.authorId !== user.id) {
+      throw new Error('Только автор или администратор может редактировать эту тему');
     }
 
     const updated: Category = {
@@ -244,22 +314,37 @@ class Database {
     return updated;
   }
 
-  public deleteCategory(id: string, user?: User | null): void {
+  public deleteCategory(id: string, user?: User | null): { deleted: boolean; status?: string } {
     const index = this.data.categories.findIndex((c) => c.id === id);
     if (index === -1) {
-      return;
+      return { deleted: false };
     }
 
     const category = this.data.categories[index];
-    if (category.authorId && user && category.authorId !== user.id) {
-      throw new Error('Только автор может удалить эту тему');
+    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    const isAuthor = category.authorId && user && category.authorId === user.id;
+
+    if (!isMainAdmin && category.authorId && user && category.authorId !== user.id) {
+      throw new Error('Только автор или администратор может удалить эту тему');
     }
 
-    // Remove category
-    this.data.categories.splice(index, 1);
-    // Remove related questions
-    this.data.questions = this.data.questions.filter((q) => q.categoryId !== id);
-    this.saveData();
+    // If main admin deleted someone else's theme:
+    // Mark status: 'removed_by_admin' and set adminNotice, so the author gets notified
+    if (isMainAdmin && !isAuthor && category.authorId) {
+      this.data.categories[index] = {
+        ...category,
+        status: 'removed_by_admin',
+        adminNotice: 'Тема снята с публикации главным администратором (slipp1)',
+      };
+      this.saveData();
+      return { deleted: false, status: 'removed_by_admin' };
+    } else {
+      // Author deleted their own theme or dismissed the notice: permanently delete!
+      this.data.categories.splice(index, 1);
+      this.data.questions = this.data.questions.filter((q) => q.categoryId !== id);
+      this.saveData();
+      return { deleted: true };
+    }
   }
 
   public syncCategories(categories: Category[]): Category[] {
@@ -328,8 +413,9 @@ class Database {
     const question = this.data.questions[index];
     const category = this.getCategoryById(question.categoryId);
 
-    if (category && category.authorId && user && category.authorId !== user.id) {
-      throw new Error('Только автор темы может редактировать клипы');
+    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
+    if (!isMainAdmin && category && category.authorId && user && category.authorId !== user.id) {
+      throw new Error('Только автор темы или администратор может редактировать клипы');
     }
 
     const updated: VideoQuestion = {
@@ -352,9 +438,10 @@ class Database {
 
     const question = this.data.questions[index];
     const category = this.getCategoryById(question.categoryId);
+    const isMainAdmin = user?.role === 'admin' || user?.username?.toLowerCase() === 'slipp1';
 
-    if (category && category.authorId && user && category.authorId !== user.id) {
-      throw new Error('Только автор темы может удалять клипы');
+    if (!isMainAdmin && category && category.authorId && user && category.authorId !== user.id) {
+      throw new Error('Только автор темы или администратор может удалять клипы');
     }
 
     this.data.questions.splice(index, 1);

@@ -42,6 +42,23 @@ export async function resolveTwitchClip(urlOrSlug: string): Promise<TwitchClipRe
   const slug = extractTwitchClipSlug(urlOrSlug);
   if (!slug) return null;
 
+  // 1. Try server-side resolution first (no CORS, ultra-reliable)
+  try {
+    const serverRes = await fetch(`/api/twitch/resolve?url=${encodeURIComponent(urlOrSlug)}`);
+    if (serverRes.ok) {
+      const serverData = await serverRes.json();
+      if (serverData && serverData.mp4Url) {
+        return {
+          mp4Url: serverData.mp4Url,
+          title: serverData.title || '',
+        };
+      }
+    }
+  } catch (serverErr) {
+    console.warn('Server twitch resolve failed, trying client directly', serverErr);
+  }
+
+  // 2. Client-side fallback via Twitch GQL
   try {
     const payload = [
       {

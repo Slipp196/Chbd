@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import { db } from './server/db';
@@ -38,6 +39,12 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use('/uploads', express.static(uploadsDir));
+
   app.use(cors());
   app.use(express.json({ limit: '20mb' }));
   app.use(authMiddleware);
@@ -47,6 +54,120 @@ async function startServer() {
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: Date.now() });
+  });
+
+  // Upload video directly to server (persists across devices and users)
+  app.post('/api/upload-video', (req: Request, res: Response) => {
+    try {
+      const originalName = decodeURIComponent((req.headers['x-filename'] as string) || 'clip.mp4');
+      const ext = path.extname(originalName) || '.mp4';
+      const safeExt = ['.mp4', '.webm', '.mov', '.ogg', '.m4v'].includes(ext.toLowerCase()) ? ext.toLowerCase() : '.mp4';
+      const filename = `vid_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${safeExt}`;
+      const filePath = path.join(uploadsDir, filename);
+
+      const writeStream = fs.createWriteStream(filePath);
+      req.pipe(writeStream);
+
+      writeStream.on('finish', () => {
+        const publicUrl = `/uploads/${filename}`;
+        res.json({ success: true, url: publicUrl, filename });
+      });
+
+      writeStream.on('error', (err) => {
+        console.error('Error saving uploaded video:', err);
+        res.status(500).json({ error: 'Ошибка сохранения видеофайла на сервере' });
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Ошибка загрузки видео' });
+    }
+  });
+
+  // Resolve Twitch clips server-side (bypasses browser CORS & restrictions)
+  app.get('/api/twitch/resolve', async (req: Request, res: Response) => {
+    try {
+      const url = req.query.url as string;
+      if (!url) {
+        res.status(400).json({ error: 'Параметр url обязателен' });
+        return;
+      }
+
+      // Extract slug
+      let slug = '';
+      const clipsTvMatch = url.match(/clips\.twitch\.tv\/([A-Za-z0-9_-]+)/i);
+      if (clipsTvMatch && clipsTvMatch[1]) {
+        slug = clipsTvMatch[1];
+      } else {
+        const twitchTvMatch = url.match(/twitch\.tv\/[^/]+\/clip\/([A-Za-z0-9_-]+)/i) ||
+                              url.match(/twitch\.tv\/clips\/([A-Za-z0-9_-]+)/i);
+        if (twitchTvMatch && twitchTvMatch[1]) {
+          slug = twitchTvMatch[1];
+        } else if (/^[A-Za-z0-9_-]{10,}$/.test(url.trim())) {
+          slug = url.trim();
+        }
+      }
+
+      if (!slug) {
+        res.status(400).json({ error: 'Не удалось определить идентификатор клипа Twitch' });
+        return;
+      }
+
+      const payload = [
+        {
+          variables: { slug },
+          query: `query($slug: ID!) {
+            clip(slug: $slug) {
+              id
+              title
+              playbackAccessToken(params: { platform: "web", playerType: "site" }) {
+                signature
+                value
+              }
+              videoQualities {
+                quality
+                sourceURL
+              }
+            }
+          }`,
+        },
+      ];
+
+      const twitchRes = await fetch('https://gql.twitch.tv/gql', {
+        method: 'POST',
+        headers: {
+          'Client-Id': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!twitchRes.ok) {
+        throw new Error(`Twitch API status ${twitchRes.status}`);
+      }
+
+      const data: any = await twitchRes.json();
+      const clip = data?.[0]?.data?.clip;
+      if (!clip || !clip.videoQualities || clip.videoQualities.length === 0) {
+        res.status(404).json({ error: 'Клип не найден или приватный' });
+        return;
+      }
+
+      const bestQuality = clip.videoQualities[0];
+      const signature = clip.playbackAccessToken?.signature;
+      const value = clip.playbackAccessToken?.value;
+
+      let mp4Url = bestQuality.sourceURL;
+      if (signature && value) {
+        const glue = mp4Url.includes('?') ? '&' : '?';
+        mp4Url = `${mp4Url}${glue}sig=${signature}&token=${encodeURIComponent(value)}`;
+      }
+
+      res.json({
+        mp4Url,
+        title: clip.title || '',
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Ошибка обработки клипа Twitch' });
+    }
   });
 
   // Auth: Register
@@ -80,6 +201,16 @@ async function startServer() {
     }
   });
 
+  // Profile: Update bio, avatarUrl, bannerUrl
+  app.put('/api/user/profile', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const updatedUser = db.updateProfile(req.user!.id, req.body);
+      res.json({ user: updatedUser });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Ошибка обновления профиля' });
+    }
+  });
+
   // Auth: Logout
   app.post('/api/auth/logout', (req: AuthenticatedRequest, res: Response) => {
     const authHeader = req.headers.authorization;
@@ -90,9 +221,10 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Categories: Get all
-  app.get('/api/categories', (req: Request, res: Response) => {
-    const categories = db.getCategories();
+  // Categories: Get with privacy filter & admin view mode
+  app.get('/api/categories', (req: AuthenticatedRequest, res: Response) => {
+    const viewMode = (req.query.viewMode as string) === 'user_preview' ? 'user_preview' : 'admin';
+    const categories = db.getCategories(req.user || null, viewMode);
     res.json(categories);
   });
 
@@ -117,11 +249,11 @@ async function startServer() {
     }
   });
 
-  // Categories: Delete
+  // Categories: Delete (or mark removed_by_admin)
   app.delete('/api/categories/:id', (req: AuthenticatedRequest, res: Response) => {
     try {
-      db.deleteCategory(req.params.id, req.user || null);
-      res.json({ success: true, id: req.params.id });
+      const result = db.deleteCategory(req.params.id, req.user || null);
+      res.json({ success: true, id: req.params.id, ...result });
     } catch (err: any) {
       const status = err.message?.includes('Только автор') ? 403 : 400;
       res.status(status).json({ error: err.message || 'Ошибка удаления категории' });

@@ -2,6 +2,10 @@ export interface User {
   id: string;
   username: string;
   createdAt: number;
+  role?: 'admin' | 'user';
+  avatarUrl?: string;
+  bannerUrl?: string;
+  bio?: string;
 }
 
 export interface AuthState {
@@ -41,6 +45,8 @@ export interface Category {
   authorId?: string | null;
   authorName?: string | null;
   createdAt: number;
+  status?: 'active' | 'removed_by_admin';
+  adminNotice?: string;
 }
 
 export interface GameAnswerRecord {

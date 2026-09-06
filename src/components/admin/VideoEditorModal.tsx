@@ -16,6 +16,7 @@ import {
 import { VideoQuestion, AnswerOption } from '../../types';
 import { storeVideoBlob, getVideoBlob } from '../../services/db';
 import { resolveTwitchClip, extractTwitchClipSlug } from '../../utils/twitch';
+import { api } from '../../services/api';
 
 interface VideoEditorModalProps {
   isOpen: boolean;
@@ -68,6 +69,7 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isTestingPause, setIsTestingPause] = useState(false);
+  const [isUploadingServer, setIsUploadingServer] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Load existing blob or url
@@ -248,8 +250,21 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
     }
 
     let savedBlobKey = blobKey;
+    let finalVideoUrl = resolvedVideoUrl || inputUrl.trim();
 
     if (videoBlob) {
+      setIsUploadingServer(true);
+      try {
+        const uploadRes = await api.media.uploadVideo(videoBlob, (videoBlob as File).name || 'clip.mp4');
+        if (uploadRes && uploadRes.url) {
+          finalVideoUrl = uploadRes.url;
+        }
+      } catch (uploadErr) {
+        console.warn('Video server upload warning, fallback to indexedDB:', uploadErr);
+      } finally {
+        setIsUploadingServer(false);
+      }
+
       savedBlobKey = savedBlobKey || `video_blob_${Date.now()}`;
       try {
         await storeVideoBlob(savedBlobKey, videoBlob);
@@ -263,7 +278,7 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
       categoryId,
       title: title.trim(),
       prompt: prompt.trim() || 'Что было дальше?',
-      videoUrl: previewBlobUrl ? '' : (resolvedVideoUrl || inputUrl.trim()),
+      videoUrl: finalVideoUrl,
       videoBlobKey: savedBlobKey,
       pauseTime: pauseTime,
       options: options.map((opt) => ({ ...opt, text: opt.text.trim() })),
@@ -629,10 +644,12 @@ export const VideoEditorModal: React.FC<VideoEditorModalProps> = ({
             </button>
             <button
               type="button"
+              disabled={isUploadingServer}
               onClick={handleSave}
-              className="px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold shadow-md transition-all focus:outline-none"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-zinc-100 hover:bg-white disabled:opacity-50 text-zinc-950 text-xs font-semibold shadow-md transition-all focus:outline-none"
             >
-              {initialQuestion ? 'Сохранить' : 'Добавить'}
+              {isUploadingServer && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>{isUploadingServer ? 'Загрузка видео...' : initialQuestion ? 'Сохранить' : 'Добавить'}</span>
             </button>
           </div>
         </div>

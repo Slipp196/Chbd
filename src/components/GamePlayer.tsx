@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Play,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Category, VideoQuestion, GameAnswerRecord } from '../types';
 import { getVideoBlob } from '../services/db';
+import { resolveTwitchClip } from '../utils/twitch';
 import {
   playSelectSound,
   playCorrectSound,
@@ -42,6 +43,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const currentQuestion = questions[currentIndex];
+  const currentQuestionId = currentQuestion?.id;
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoSrc, setVideoSrc] = useState<string>('');
@@ -56,9 +58,8 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
   const [answersHistory, setAnswersHistory] = useState<Record<string, GameAnswerRecord>>({});
-  const [autoResumeTimer, setAutoResumeTimer] = useState<number | null>(null);
 
-  // Load video source (IndexedDB Blob or Direct URL)
+  // Load video source (Server URL, Twitch, or IndexedDB Blob)
   useEffect(() => {
     let active = true;
     let objectUrlToRevoke: string | null = null;
@@ -68,7 +69,29 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
       setPhase('loading');
       setSelectedOptionId(null);
       setCurrentTime(0);
+      setIsPlaying(false);
 
+      // 1. Direct file or server url
+      let directUrl = currentQuestion.videoUrl || '';
+
+      // Check if Twitch clip needing resolution
+      if (directUrl && (directUrl.includes('twitch.tv') || directUrl.includes('clips.twitch.tv'))) {
+        try {
+          const resolved = await resolveTwitchClip(directUrl);
+          if (resolved?.mp4Url && active) {
+            directUrl = resolved.mp4Url;
+          }
+        } catch (err) {
+          console.warn('Twitch resolve error in player', err);
+        }
+      }
+
+      if (directUrl && active) {
+        setVideoSrc(directUrl);
+        return;
+      }
+
+      // 2. IndexedDB blob fallback if URL not available
       if (currentQuestion.videoBlobKey) {
         try {
           const blob = await getVideoBlob(currentQuestion.videoBlobKey);
@@ -84,7 +107,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
       }
 
       if (active) {
-        setVideoSrc(currentQuestion.videoUrl);
+        setVideoSrc('');
       }
     }
 
@@ -95,11 +118,8 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
       if (objectUrlToRevoke) {
         URL.revokeObjectURL(objectUrlToRevoke);
       }
-      if (autoResumeTimer) {
-        window.clearTimeout(autoResumeTimer);
-      }
     };
-  }, [currentQuestion]);
+  }, [currentQuestionId]);
 
   // Sync score with parent
   useEffect(() => {
@@ -113,6 +133,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
     if (!videoRef.current) return;
     setDuration(videoRef.current.duration || 0);
     setPhase('playing_before');
+    videoRef.current.currentTime = 0;
     videoRef.current.play().then(() => {
       setIsPlaying(true);
     }).catch(() => {
@@ -125,9 +146,10 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
     const time = videoRef.current.currentTime;
     setCurrentTime(time);
 
-    // Stop at designated climax pause point
-    if (phase === 'playing_before' && time >= currentQuestion.pauseTime) {
+    // Stop strictly at designated pause point
+    if (phase === 'playing_before' && currentQuestion.pauseTime > 0 && time >= currentQuestion.pauseTime) {
       videoRef.current.pause();
+      videoRef.current.currentTime = currentQuestion.pauseTime;
       setIsPlaying(false);
       setPhase('paused_question');
       playPauseTriggerSound();
@@ -141,6 +163,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
 
   const togglePlayPause = () => {
     if (!videoRef.current) return;
+    // When waiting for user answer at stop point, manual play is prohibited
     if (phase === 'paused_question') {
       return;
     }
@@ -149,8 +172,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
       videoRef.current.pause();
       setIsPlaying(false);
     } else {
-      videoRef.current.play();
-      setIsPlaying(true);
+      videoRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(console.error);
     }
   };
 
@@ -159,11 +183,12 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
     videoRef.current.currentTime = 0;
     setCurrentTime(0);
     setPhase('playing_before');
-    videoRef.current.play();
-    setIsPlaying(true);
+    videoRef.current.play().then(() => {
+      setIsPlaying(true);
+    }).catch(console.error);
   };
 
-  // Option selection
+  // Option selection - NO forced timers, user controls next step
   const handleOptionSelect = (optionId: string) => {
     if (phase !== 'paused_question' || selectedOptionId) return;
 
@@ -192,19 +217,9 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
     }));
 
     setPhase('answered');
-
-    // Auto-resume after 2.5 seconds to reveal what happened
-    const timer = window.setTimeout(() => {
-      resumePlaybackToRevealClimax();
-    }, 2400);
-    setAutoResumeTimer(timer);
   };
 
   const resumePlaybackToRevealClimax = () => {
-    if (autoResumeTimer) {
-      window.clearTimeout(autoResumeTimer);
-      setAutoResumeTimer(null);
-    }
     if (!videoRef.current) return;
 
     setPhase('playing_after');
@@ -216,10 +231,6 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
   };
 
   const handleNextQuestion = () => {
-    if (autoResumeTimer) {
-      window.clearTimeout(autoResumeTimer);
-    }
-
     if (currentIndex < questions.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     } else {
@@ -272,7 +283,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
             </div>
           )}
 
-          {/* Score pill strictly here as user requested */}
+          {/* Score pill */}
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900/70 border border-white/10 backdrop-blur-md text-xs font-semibold text-zinc-100">
             <Sparkles className="w-3 h-3 text-zinc-300" />
             <span>{score} очков</span>
@@ -302,7 +313,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
         })}
       </div>
 
-      {/* Main Video & Answers Unified Container (Harmonious Zen Graphite Palette) */}
+      {/* Main Video & Answers Container */}
       <div className="w-full relative rounded-3xl overflow-hidden bg-zinc-900/60 border border-white/[0.08] shadow-2xl backdrop-blur-xl">
         {/* Video Screen */}
         <div className="relative w-full aspect-video flex items-center justify-center bg-[#141416] overflow-hidden">
@@ -315,6 +326,17 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
               onLoadedMetadata={handleLoadedMetadata}
               onTimeUpdate={handleTimeUpdate}
               onEnded={handleVideoEnded}
+              onPlay={() => {
+                if (phase === 'paused_question') {
+                  videoRef.current?.pause();
+                  setIsPlaying(false);
+                  return;
+                }
+                setIsPlaying(true);
+              }}
+              onPause={() => {
+                setIsPlaying(false);
+              }}
               className="w-full h-full object-contain cursor-pointer"
               onClick={togglePlayPause}
             />
@@ -472,7 +494,7 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
 
           {/* Action Bar when answered */}
           {(phase === 'answered' || phase === 'playing_after' || phase === 'clip_ended') && (
-            <div className="mt-4 pt-3.5 border-t border-white/[0.06] flex items-center justify-between gap-3">
+            <div className="mt-4 pt-3.5 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs">
                 {selectedOptionId === currentQuestion.correctOptionId ? (
                   <span className="text-emerald-400 font-medium flex items-center gap-1.5">
@@ -503,16 +525,14 @@ export const GamePlayer: React.FC<GamePlayerProps> = ({
                   </button>
                 )}
 
-                {(phase === 'playing_after' || phase === 'clip_ended') && (
-                  <button
-                    id="btn-next-clip"
-                    onClick={handleNextQuestion}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition-all shadow-md focus:outline-none"
-                  >
-                    <span>{currentIndex < questions.length - 1 ? 'Дальше' : 'Итоги'}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                )}
+                <button
+                  id="btn-next-clip"
+                  onClick={handleNextQuestion}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-medium transition-all focus:outline-none"
+                >
+                  <span>{currentIndex < questions.length - 1 ? 'Дальше' : 'Итоги'}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           )}

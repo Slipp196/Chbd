@@ -1,6 +1,7 @@
 import { Category, VideoQuestion, CategoryStats, User } from '../types';
 
 const TOKEN_STORAGE_KEY = 'chbd_auth_token_v1';
+const USER_STORAGE_KEY = 'chbd_cached_user_v1';
 
 export function getStoredToken(): string | null {
   try {
@@ -19,6 +20,28 @@ export function setStoredToken(token: string | null) {
     }
   } catch (e) {
     console.error('Error saving token', e);
+  }
+}
+
+export function getStoredUser(): User | null {
+  try {
+    const raw = localStorage.getItem(USER_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as User;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredUser(user: User | null) {
+  try {
+    if (user) {
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(USER_STORAGE_KEY);
+    }
+  } catch (e) {
+    console.error('Error saving user cache', e);
   }
 }
 
@@ -56,6 +79,7 @@ export const api = {
         body: JSON.stringify({ username, password }),
       });
       setStoredToken(res.token);
+      setStoredUser(res.user);
       return res;
     },
 
@@ -65,17 +89,27 @@ export const api = {
         body: JSON.stringify({ username, password }),
       });
       setStoredToken(res.token);
+      setStoredUser(res.user);
       return res;
     },
 
     async getMe(): Promise<User | null> {
       const token = getStoredToken();
-      if (!token) return null;
+      if (!token) {
+        setStoredUser(null);
+        return null;
+      }
       try {
         const res = await request<{ user: User | null }>('/api/auth/me');
+        if (res.user) {
+          setStoredUser(res.user);
+        } else {
+          setStoredUser(null);
+        }
         return res.user;
       } catch {
         setStoredToken(null);
+        setStoredUser(null);
         return null;
       }
     },
@@ -85,14 +119,61 @@ export const api = {
         await request('/api/auth/logout', { method: 'POST' });
       } finally {
         setStoredToken(null);
+        setStoredUser(null);
       }
+    },
+  },
+
+  // User Profile
+  user: {
+    async updateProfile(updates: { avatarUrl?: string; bannerUrl?: string; bio?: string }): Promise<User> {
+      const res = await request<{ user: User }>('/api/user/profile', {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+      });
+      if (res.user) {
+        setStoredUser(res.user);
+      }
+      return res.user;
+    },
+  },
+
+  // Media upload to server (persists across friends and browsers)
+  media: {
+    async uploadVideo(blobOrFile: Blob | File, filename: string = 'video.mp4'): Promise<{ url: string; filename: string }> {
+      const token = getStoredToken();
+      const headers: Record<string, string> = {
+        'x-filename': encodeURIComponent(filename),
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch('/api/upload-video', {
+        method: 'POST',
+        headers,
+        body: blobOrFile,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Ошибка при загрузке видеофайла');
+      }
+      return data;
+    },
+  },
+
+  // Twitch
+  twitch: {
+    async resolve(url: string): Promise<{ mp4Url: string; title: string }> {
+      return request<{ mp4Url: string; title: string }>(`/api/twitch/resolve?url=${encodeURIComponent(url)}`);
     },
   },
 
   // Categories
   categories: {
-    async getAll(): Promise<Category[]> {
-      return request<Category[]>('/api/categories');
+    async getAll(viewMode: 'admin' | 'user_preview' = 'admin'): Promise<Category[]> {
+      return request<Category[]>(`/api/categories?viewMode=${viewMode}`);
     },
 
     async create(
@@ -114,8 +195,8 @@ export const api = {
       });
     },
 
-    async delete(id: string): Promise<{ success: boolean; id: string }> {
-      return request<{ success: boolean; id: string }>(`/api/categories/${id}`, {
+    async delete(id: string): Promise<{ success: boolean; id: string; status?: string }> {
+      return request<{ success: boolean; id: string; status?: string }>(`/api/categories/${id}`, {
         method: 'DELETE',
       });
     },

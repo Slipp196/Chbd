@@ -66,14 +66,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     (q) => q.categoryId === (activeCategory ? activeCategory.id : '')
   );
 
+  // Admin check
+  const isGlobalAdmin = currentUser?.role === 'admin' || currentUser?.username?.toLowerCase() === 'slipp1';
+
   // Can current user edit the active category?
   const canEditActiveCategory = Boolean(
     activeCategory &&
-      (!activeCategory.authorId || (currentUser && currentUser.id === activeCategory.authorId))
+      (!activeCategory.authorId || isGlobalAdmin || (currentUser && currentUser.id === activeCategory.authorId))
   );
 
   const canEditCategory = (cat: Category) => {
-    return !cat.authorId || (currentUser && currentUser.id === cat.authorId);
+    return !cat.authorId || isGlobalAdmin || (currentUser && currentUser.id === cat.authorId);
   };
 
   // Categories CRUD
@@ -85,8 +88,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleSaveCategory = (data: Omit<Category, 'createdAt'> & { id?: string }) => {
     if (data.id) {
       const existing = categories.find((c) => c.id === data.id);
-      if (existing && existing.authorId && currentUser && currentUser.id !== existing.authorId) {
-        setErrorMessage('Только автор может редактировать эту тему');
+      if (existing && existing.authorId && !isGlobalAdmin && currentUser && currentUser.id !== existing.authorId) {
+        setErrorMessage('Только автор или администратор может редактировать эту тему');
         return;
       }
 
@@ -121,8 +124,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleDeleteCategory = (catId: string) => {
     const cat = categories.find((c) => c.id === catId);
-    if (cat && cat.authorId && currentUser && currentUser.id !== cat.authorId) {
-      setErrorMessage('Только автор может удалить эту тему');
+    if (cat && cat.authorId && !isGlobalAdmin && currentUser && currentUser.id !== cat.authorId) {
+      setErrorMessage('Только автор или администратор может удалить эту тему');
       setConfirmDeleteCatId(null);
       return;
     }
